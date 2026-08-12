@@ -8,8 +8,8 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
-local JestGlobals = require(ReplicatedStorage.DevPackages.JestGlobals)
 local HealthState = require(ServerScriptService.Server.Services.HealthService.HealthState)
+local JestGlobals = require(ReplicatedStorage.DevPackages.JestGlobals)
 
 local describe = JestGlobals.describe
 local expect = JestGlobals.expect
