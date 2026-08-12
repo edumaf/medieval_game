@@ -120,7 +120,7 @@ end
 local waited = 0
 local finalTask = getTask()
 
-while finalTask.state == "QUEUED" or finalTask.state == "PROCESSING" do
+while finalTask.state == "PROCESSING" do
 	if waited >= POLL_TIMEOUT_SECONDS then
 		abort(`Timed out after {POLL_TIMEOUT_SECONDS}s waiting for the execution task.`)
 	end
@@ -155,8 +155,10 @@ if finalTask.state ~= "COMPLETE" then
 	)
 end
 
-local returnValues = (finalTask.output or {}).returnValues
-local summary = if returnValues then returnValues[1] else nil
+-- Roblox's own reference implementation (Open Cloud execution binary payloads
+-- example) reads this array as `output.results`, not `output.returnValues`.
+local results = (finalTask.output or {}).results
+local summary = if results then results[1] else nil
 
 if summary == nil then
 	abort("The entry script returned nothing. Check the session output above.")

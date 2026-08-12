@@ -19,10 +19,10 @@ Example: "Played solo in Studio, joined with 2 players via Test > Clients and
 Servers, confirmed the handshake logs the right build on both."
 -->
 
-- [ ] `stylua --check src tests scripts` passes
-- [ ] `selene src tests scripts` passes
+- [ ] `stylua --check src tests scripts plugin` passes
+- [ ] `selene src tests scripts plugin` passes
 - [ ] `luau-lsp analyze` passes (see README "Running validation")
-- [ ] Jest suite passes in Studio (press Play, check Output)
+- [ ] Jest suite passes via the Studio plugin (Plugins → Medieval Game Tests → Run Tests — not Play mode)
 - [ ] Play-tested in Roblox Studio
 
 ## Studio / map changes

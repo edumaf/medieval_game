@@ -3,6 +3,18 @@
 We use [Jest Lua](https://jsdotlua.github.io/jest-lua/) — the framework Roblox
 uses internally, and the successor to TestEZ.
 
+There are three distinct testing paths in this repository. Know which one
+you're running:
+
+| Path | What it tests | How | When |
+| --- | --- | --- | --- |
+| **Unit tests** | Pure logic in `src/shared`, `src/server`, `src/client` | The Studio Jest plugin | Every change |
+| **Integration / gameplay tests** | Multiplayer, replication, UI, input, networking | Pressing **Play** in Studio, by hand | Every change |
+| **CI tests** | The same Jest suite as local unit tests | Open Cloud, in GitHub Actions | Every PR |
+
+Play mode is **not** a way to run Jest. See "Running them locally" below for
+why, and "Gameplay testing" in the README for what Play mode is actually for.
+
 ## Where tests live
 
 `tests/`, mirroring the shape of `src/`:
@@ -10,7 +22,6 @@ uses internally, and the successor to TestEZ.
 ```
 tests/
   jest.config.luau          testMatch — do not rename spec files without updating this
-  TestRunner.server.luau    runs the suite when you press Play in Studio
   shared/
     Config.spec.luau
     Logger.spec.luau
@@ -48,33 +59,54 @@ functions: validation, formulas, state transitions, data shaping. Something that
 needs three players and a physics step is an integration test you should
 play-test, not a unit test.
 
-## Running them in Studio
+## Running them locally
 
-**One-time setup per machine.** Jest needs Studio's `FFlagEnableLoadModule`
-flag, which is off by default:
+**Not with Play mode.** Jest's per-test module isolation calls
+`debug.loadmodule`, which reads a ModuleScript's `Source` property. Roblox's
+Script Capabilities model gates that behind the `PluginOrOpenCloud`
+capability, which an ordinary Play-mode script never has — flipping
+`FFlagEnableLoadModule` does not change this, because the flag only controls
+whether `debug.loadmodule` exists, not whether the calling script is
+authorized to use it. A `Script` under `ServerScriptService` during Play mode
+is neither a plugin nor an Open Cloud session, so it fails with:
 
-1. Close Roblox Studio.
-2. Create or edit `ClientAppSettings.json` in your Studio install folder:
-   - Windows: `%LOCALAPPDATA%\Roblox\Versions\<version>\ClientSettings\`
-   - macOS: `~/Library/Application Support/Roblox/Versions/<version>/ClientSettings/`
-   (Create the `ClientSettings` folder if it does not exist.)
-3. Put this in it:
-   ```json
-   { "FFlagEnableLoadModule": "True" }
-   ```
-4. Reopen Studio.
+```
+The current thread cannot read 'Source' (lacking capability PluginOrOpenCloud)
+```
 
-That file is machine-specific and gitignored — never commit it. You will need to
-redo this after a Studio version update, because the path contains the version.
+before a single test runs. This is why `tests/TestRunner.server.luau` was
+removed — it could not have worked, on any machine, regardless of Studio
+flags.
+
+**Use the Studio plugin instead.** A plugin runs with the capability Jest
+needs, which is why Roblox's own internal Jest tooling also runs tests from a
+Studio plugin rather than Play mode. It requires the exact same
+`ServerScriptService.Tests` and `ReplicatedStorage.DevPackages.Jest` Rojo
+already syncs — it is not a second test system, it runs the real project.
+
+**One-time setup per machine:**
+
+```bash
+lune run scripts/install-test-plugin
+```
+
+This copies `plugin/JestRunner.luau` into your local Roblox Plugins folder.
+See [`plugin/README.md`](../plugin/README.md) if you need to install it by
+hand, or if the installer does not recognise your platform. Restart Studio
+afterwards, and re-run the installer any time `plugin/JestRunner.luau`
+changes.
 
 **Every time:**
 
-1. `rojo serve`, connect the plugin.
-2. Press **Play** in Studio.
-3. Results appear in the Output window. `TestRunner` only runs in Studio, so
-   nothing test-related executes in a live server.
+1. `rojo serve`, connect the plugin, so `ReplicatedStorage.DevPackages` and
+   `ServerScriptService.Tests` are present.
+2. **Plugins** tab → **Medieval Game Tests** → **Run Tests**.
+3. Results appear in the Output window.
 
-If you see `DevPackages is missing`, run `wally install` and reconnect Rojo.
+If you see `ReplicatedStorage.DevPackages is missing`, run `wally install` and
+reconnect Rojo. The button also refuses to run while you are in Play mode — it
+tests the Edit-mode project, not the live session, so running both together
+would be misleading rather than useful.
 
 ## Running them in CI
 
@@ -86,6 +118,42 @@ is what `.github/workflows/roblox-tests.yml` does.
 Until it is configured, the workflow skips and every-PR confidence comes from the
 `CI` workflow: formatting, linting, type-checking, project validation and a real
 build of both project files.
+
+> `scripts/open-cloud-tests.luau` had transport-level bugs fixed early on: the
+> polling loop checked for a `"QUEUED"` task state that does not exist in the
+> current API, and the result parser read `output.returnValues` where
+> Roblox's own reference implementation reads `output.results`. Once this was
+> actually configured and run for real, the workflow correctly reached the
+> Roblox execution session and uploaded/executed the place — but Jest itself
+> then failed inside the session. See below.
+
+### Why Jest needs `ServerScriptService.LoadStringEnabled`
+
+Jest's module loader (`jest-runtime`) tries two mechanisms to load a test
+module in its own isolated environment, in order:
+
+1. `debug.loadmodule` — needs the `PluginOrOpenCloud` capability (see above)
+   *and* Studio's `FFlagEnableLoadModule`, which only exists on a developer's
+   local Studio install. Open Cloud's headless execution servers have no way
+   for a developer to set that flag, so this path is unavailable there.
+2. `loadstring(source, chunkName)` — jest-runtime's own fallback for exactly
+   this situation, added in 3.10.0. `loadstring` is disabled by default for
+   *every* server script on Roblox (`ServerScriptService.LoadStringEnabled`
+   defaults to `false`) — including inside an Open Cloud execution session,
+   which loads and runs the uploaded place under normal server rules. With
+   both mechanisms unavailable, Jest fails with `loadstring() is not
+   available` before a single test runs.
+
+The fix is **not** a Jest, Wally, or version change — 3.10.0 is the current
+release and its two-tier fallback is already the correct design; the second
+tier just needs to be switched on for this one, dev-only place.
+`default.project.json`'s `ServerScriptService` now sets
+`$properties.LoadStringEnabled: true`, which Rojo bakes into
+`build/test-place.rbxl` (and the local `build/dev.rbxl`). `build.project.json`
+— the actual production place — is untouched and still defaults to `false`;
+nothing in this codebase calls `loadstring` outside of Jest's own fallback,
+and Jest is never part of a production build (`build.project.json` has no
+`Tests` or `DevPackages` mapping at all). See `docs/decisions.md`.
 
 ### Configuring it
 

@@ -44,11 +44,11 @@ git checkout -b chore/toolchain-update
    wally install
    rojo sourcemap default.project.json --output sourcemap.json
    wally-package-types --sourcemap sourcemap.json DevPackages/
-   stylua --check src tests scripts
-   selene src tests scripts
+   stylua --check src tests scripts plugin
+   selene src tests scripts plugin
    luau-lsp analyze --platform=roblox --sourcemap=sourcemap.json \
      --definitions=.tooling/globalTypes.d.luau --base-luaurc=.luaurc \
-     --ignore="**/Packages/**" --ignore="**/DevPackages/**" src tests
+     --ignore="**/Packages/**" --ignore="**/DevPackages/**" src tests plugin
    lune run scripts/validate-project
    rojo build default.project.json --output build/dev.rbxl
    rojo build build.project.json --output build/medieval-game.rbxl
@@ -56,7 +56,8 @@ git checkout -b chore/toolchain-update
    A StyLua bump will usually reformat files. Commit that reformat **as its own
    commit** so the version bump stays reviewable.
 6. **Test the Studio path by hand.** `rojo serve`, connect, press Play, confirm
-   the boot logs appear and the Jest suite still runs. CI cannot check this.
+   the boot logs appear once each, then separately run the Studio Jest plugin
+   and confirm the suite still runs. CI cannot check either of these.
 7. **Update this table** and the version in `docs/decisions.md` if the reasoning
    changed.
 8. Open a PR titled `chore: update toolchain` listing old → new for each tool.

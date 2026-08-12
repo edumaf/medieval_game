@@ -20,6 +20,9 @@
 
     "ServerScriptService": {
       "$className": "ServerScriptService",
+      "$properties": {
+        "LoadStringEnabled": true
+      },
       "Server": {
         "$path": "src/server"
       },
@@ -36,7 +39,7 @@
       "StarterPlayerScripts": {
         "$className": "StarterPlayerScripts",
         "Client": {
-          "$path": "src/client"
+          "$path": "src/client.project.json"
         }
       }
     }
