@@ -81,6 +81,40 @@ into Studio's Plugins folder. Revisit this if the team ends up wanting
 coverage reports, watch mode, or other features that are genuinely hard to
 hand-roll.
 
+## `ServerScriptService.LoadStringEnabled: true`, dev/test project only
+
+Once Open Cloud was actually configured and run for real, Jest failed inside
+the execution session with `loadstring() is not available`, after correctly
+reaching Roblox's server and starting to collect tests. This is a different
+problem from the `PluginOrOpenCloud` capability issue above, not a
+restatement of it — the capability check was already passing (Open Cloud
+sessions do carry `PluginOrOpenCloud`), but `jest-runtime@3.10.0` has a
+second, independent requirement.
+
+`jest-runtime` tries `debug.loadmodule` first, and falls back to
+`loadstring(source, chunkName)` if that's unavailable — this fallback was
+added in 3.10.0 specifically for lower-privileged contexts, so this is not a
+bug in Jest or a reason to change its version; 3.10.0 is current and its
+design is correct. `debug.loadmodule` requires Studio's
+`FFlagEnableLoadModule`, which has no equivalent on Open Cloud's headless
+servers, so Open Cloud always falls to the second tier. `loadstring` is
+disabled by default for every Roblox server script
+(`ServerScriptService.LoadStringEnabled` defaults to `false`) — a security
+default, since misuse can lead to remote code execution — and an Open Cloud
+execution session runs the uploaded place under ordinary server rules, so it
+inherits that default too.
+
+The fix is a place property, not a code or dependency change:
+`default.project.json`'s `ServerScriptService` now sets
+`$properties.LoadStringEnabled: true`, so it's baked into
+`build/test-place.rbxl` (and the local `build/dev.rbxl`). This is scoped
+exactly the same way `Tests/` and `DevPackages` already are: `default.project.json`
+is the dev/test project; `build.project.json` — the actual production
+place — does not set it and keeps Roblox's `false` default. Nothing in this
+codebase calls `loadstring` outside of Jest's own fallback, and Jest is never
+part of a production build in the first place, so there is no path for this
+setting to reach a live server.
+
 ## Tests in CI run through Open Cloud, not a Roblox Studio session
 
 CI cannot launch Roblox Studio, and Jest cannot run outside Roblox. The

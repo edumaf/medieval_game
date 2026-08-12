@@ -119,16 +119,41 @@ Until it is configured, the workflow skips and every-PR confidence comes from th
 `CI` workflow: formatting, linting, type-checking, project validation and a real
 build of both project files.
 
-> `scripts/open-cloud-tests.luau` had two real bugs fixed alongside this
-> testing-workflow change: the polling loop checked for a `"QUEUED"` task
-> state that does not appear to exist in the current API, and the result
-> parser read `output.returnValues` where Roblox's own reference
-> implementation reads `output.results`. Both were fixed by re-deriving the
-> expected shape from Roblox's official `open-cloud-execution-binary-payloads-example`
-> repository, since this environment could not exercise the API directly
-> (see "Configuring it" below — it still has never actually run against a
-> real universe). **Whoever configures this for real should treat the first
-> run as a genuine first run**, not a formality.
+> `scripts/open-cloud-tests.luau` had transport-level bugs fixed early on: the
+> polling loop checked for a `"QUEUED"` task state that does not exist in the
+> current API, and the result parser read `output.returnValues` where
+> Roblox's own reference implementation reads `output.results`. Once this was
+> actually configured and run for real, the workflow correctly reached the
+> Roblox execution session and uploaded/executed the place — but Jest itself
+> then failed inside the session. See below.
+
+### Why Jest needs `ServerScriptService.LoadStringEnabled`
+
+Jest's module loader (`jest-runtime`) tries two mechanisms to load a test
+module in its own isolated environment, in order:
+
+1. `debug.loadmodule` — needs the `PluginOrOpenCloud` capability (see above)
+   *and* Studio's `FFlagEnableLoadModule`, which only exists on a developer's
+   local Studio install. Open Cloud's headless execution servers have no way
+   for a developer to set that flag, so this path is unavailable there.
+2. `loadstring(source, chunkName)` — jest-runtime's own fallback for exactly
+   this situation, added in 3.10.0. `loadstring` is disabled by default for
+   *every* server script on Roblox (`ServerScriptService.LoadStringEnabled`
+   defaults to `false`) — including inside an Open Cloud execution session,
+   which loads and runs the uploaded place under normal server rules. With
+   both mechanisms unavailable, Jest fails with `loadstring() is not
+   available` before a single test runs.
+
+The fix is **not** a Jest, Wally, or version change — 3.10.0 is the current
+release and its two-tier fallback is already the correct design; the second
+tier just needs to be switched on for this one, dev-only place.
+`default.project.json`'s `ServerScriptService` now sets
+`$properties.LoadStringEnabled: true`, which Rojo bakes into
+`build/test-place.rbxl` (and the local `build/dev.rbxl`). `build.project.json`
+— the actual production place — is untouched and still defaults to `false`;
+nothing in this codebase calls `loadstring` outside of Jest's own fallback,
+and Jest is never part of a production build (`build.project.json` has no
+`Tests` or `DevPackages` mapping at all). See `docs/decisions.md`.
 
 ### Configuring it
 
