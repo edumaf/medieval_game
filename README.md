@@ -110,9 +110,11 @@ src/
   client/              → StarterPlayerScripts.Client  presentation and input
     init.client.luau     entry point
     Controllers/         one file per system, including UI logic
+  client.project.json  → (scopes StarterPlayerScripts.Client to a LocalScript)
 
 tests/                 → ServerScriptService.Tests    Jest specs (dev build only)
 scripts/                 Lune automation — not game code
+plugin/                  Studio plugin that runs Jest locally — not synced by Rojo
 assets/                  reviewable assets only; the map is NOT here
 docs/                    architecture and workflow guides
 .github/                 CI workflows, PR and issue templates, CODEOWNERS
@@ -291,6 +293,10 @@ You should now see a **Rojo** button in Studio's **Plugins** tab.
 > Studio instead, and check that the plugin's reported version matches
 > `rojo --version`.
 
+This repository also has a second, project-specific plugin that runs the Jest
+suite locally — install it in the [Testing](#testing) section below once
+you've cloned everything; it is not part of this setup sequence.
+
 ### 9. Configure your editor
 
 **VS Code** is what the team uses. Open the repository folder and accept the
@@ -391,9 +397,9 @@ remote round-trip, and shared config read from both sides.
 While `rojo serve` is running, every file you save appears in Studio within a
 second. Stop the server with `Ctrl+C`.
 
-> `StarterPlayerScripts.Client` appears as a **Script** with `RunContext =
-> Client`, not a `LocalScript`. That is correct — see
-> [`docs/decisions.md`](docs/decisions.md).
+> `StarterPlayerScripts.Client` appears as a **LocalScript** — the one
+> exception to the rest of the tree, which uses `Script` with `RunContext`
+> instead. That is correct — see [`docs/decisions.md`](docs/decisions.md).
 
 ---
 
@@ -487,9 +493,9 @@ Roblox security rules and the Git rules. You do not need to re-explain them.
    controllers are wired together"* costs one exchange and prevents most bad
    suggestions.
 5. **Give it one specific task.**
-6. **Read the diff it proposes.** You are the reviewer. Claude cannot run the
-   test suite — Jest only runs inside Roblox — so it cannot know whether the
-   game still works.
+6. **Read the diff it proposes.** You are the reviewer. Claude cannot click
+   the Studio plugin button or press Play — it cannot know whether the game
+   or the test suite still works, and it will tell you so rather than guess.
 7. **Test it in Studio** and run validation yourself.
 8. **Commit when the change is right**, not when Claude says it is done.
 
@@ -591,17 +597,17 @@ means a green run there.
 
 ```bash
 # Format (do this first — it rewrites files)
-stylua src tests scripts
+stylua src tests scripts plugin
 
 # Lint
-selene src tests scripts
+selene src tests scripts plugin
 
 # Refresh the sourcemap, then type-check
 rojo sourcemap default.project.json --output sourcemap.json
 luau-lsp analyze --platform=roblox --sourcemap=sourcemap.json \
   --definitions=.tooling/globalTypes.d.luau --base-luaurc=.luaurc \
   --ignore="**/Packages/**" --ignore="**/DevPackages/**" \
-  src tests
+  src tests plugin
 
 # Repository consistency: Rojo mappings, pinned versions, lockfile
 lune run scripts/validate-project
@@ -612,12 +618,13 @@ rojo build default.project.json --output build/dev.rbxl
 rojo build build.project.json --output build/medieval-game.rbxl
 ```
 
-Plus the parts a machine cannot check: **run the tests in Studio** (press Play,
-read the Output window) and **play-test your change**.
+Plus the parts a machine cannot check: **run the unit tests from the Studio
+plugin** (**Plugins** → **Medieval Game Tests** → **Run Tests**) and
+**play-test your change** (press Play, separately).
 
 **Reading failures**
 
-- *StyLua prints a diff* — you did not format. Run `stylua src tests scripts`.
+- *StyLua prints a diff* — you did not format. Run `stylua src tests scripts plugin`.
 - *Selene `undefined_variable`* — a typo, or a missing `require`. Real bug, not
   noise.
 - *Selene `global_usage`* — you used `_G` or `shared`. Put the state in a module.
@@ -776,19 +783,20 @@ balance? Yes. Approve, and it implements.
 
 ```bash
 # 8. Validate
-stylua src tests scripts
-selene src tests scripts
+stylua src tests scripts plugin
+selene src tests scripts plugin
 rojo sourcemap default.project.json --output sourcemap.json
 luau-lsp analyze --platform=roblox --sourcemap=sourcemap.json \
   --definitions=.tooling/globalTypes.d.luau --base-luaurc=.luaurc \
-  --ignore="**/Packages/**" --ignore="**/DevPackages/**" src tests
+  --ignore="**/Packages/**" --ignore="**/DevPackages/**" src tests plugin
 lune run scripts/validate-project
 rojo build build.project.json --output build/medieval-game.rbxl
 ```
 
-**9. Test in Studio.** Connect Rojo, press Play, read the Output window — the
-Jest suite runs and your new specs appear. Then play-test: does the balance show
-up, and does nothing on the client let you change it?
+**9. Test in Studio.** Connect Rojo. Run the unit tests from **Plugins** →
+**Medieval Game Tests** → **Run Tests** and confirm your new specs appear and
+pass. Then press Play and play-test: does the balance show up, and does
+nothing on the client let you change it?
 
 ```bash
 # 10. Commit and push
@@ -820,18 +828,34 @@ git branch -d feature/player-gold
 ## Testing
 
 Tests live in `tests/`, are named `<Thing>.spec.luau`, and run with
-[Jest Lua](https://jsdotlua.github.io/jest-lua/).
+[Jest Lua](https://jsdotlua.github.io/jest-lua/). There are three separate
+testing paths — do not confuse them:
 
-**Locally:** `rojo serve`, connect, press **Play** — results appear in the Output
-window. This needs a one-time Studio flag (`FFlagEnableLoadModule`); the exact
-steps are in [`docs/testing.md`](docs/testing.md).
+**Local unit tests** run through a small Studio plugin, **not** by pressing
+Play. Jest needs a capability (`PluginOrOpenCloud`) that an ordinary Play-mode
+script does not have, so it cannot run there under Roblox's current Script
+Capabilities model, on any machine, no matter what Studio flags are set —
+this is a change from an earlier version of this document.
 
-**In CI:** Jest Lua only runs inside Roblox, so headless test execution uses
-Roblox's Open Cloud Luau Execution API
-(`.github/workflows/roblox-tests.yml`). It needs an API key and a dedicated test
-place, and skips cleanly until an admin configures them. Until then, every-PR
-confidence comes from formatting, linting, **type-checking**, project validation
-and a real build of both project files.
+```bash
+lune run scripts/install-test-plugin   # one-time per machine
+```
+
+Then in Studio: `rojo serve`, connect, **Plugins** tab → **Medieval Game
+Tests** → **Run Tests**. Results appear in the Output window. See
+[`plugin/README.md`](plugin/README.md) for manual install steps and
+[`docs/testing.md`](docs/testing.md) for why Play mode cannot do this.
+
+**Gameplay testing** — multiplayer behavior, replication, UI, input,
+networking, visual behavior — is still pressing **Play** in Studio, same as
+always. Play mode no longer starts a test runner of any kind; it is purely
+for playing the game.
+
+**CI tests** run the same Jest suite headlessly via Roblox's Open Cloud Luau
+Execution API (`.github/workflows/roblox-tests.yml`). It needs an API key and
+a dedicated test place, and skips cleanly until an admin configures them.
+Until then, every-PR confidence comes from formatting, linting,
+**type-checking**, project validation and a real build of both project files.
 
 Full guide, including how to configure Open Cloud:
 [`docs/testing.md`](docs/testing.md).
@@ -1020,15 +1044,21 @@ it must not assume either. `RunService:IsServer()` / `:IsClient()` when you trul
 need to branch.
 
 **"This is a Script, I expected a LocalScript"**
-`emitLegacyScripts` is off, so client scripts are `Script` instances with
-`RunContext = Client`. Intentional — see [`docs/decisions.md`](docs/decisions.md).
+`emitLegacyScripts` is off, so most client and server scripts are `Script`
+instances with `RunContext` set. Intentional — see
+[`docs/decisions.md`](docs/decisions.md). `StarterPlayerScripts.Client` is the
+one deliberate exception and *is* a `LocalScript` — see the same doc for why.
 
-**Jest reports nothing / `LoadModule` errors**
-The `FFlagEnableLoadModule` Studio flag is not set. See
-[`docs/testing.md`](docs/testing.md).
+**Jest reports "lacking capability PluginOrOpenCloud" / nothing happens on Play**
+Expected — Jest cannot run during Play mode at all, on any machine, regardless
+of Studio flags. Run it from the Studio plugin instead:
+[Testing](#testing), [`docs/testing.md`](docs/testing.md).
 
-**The plugin vanished after a Studio update**
+**The Rojo plugin vanished after a Studio update**
 Reinstall it: `rojo plugin install`, restart Studio.
+
+**The test plugin (Medieval Game Tests) vanished after a Studio update**
+Re-run `lune run scripts/install-test-plugin`, restart Studio.
 
 ### Claude Code
 
@@ -1057,8 +1087,9 @@ every module in src/shared/Util and tell me which one already does this before
 writing anything."*
 
 **It claims tests passed**
-It cannot run them — Jest Lua only runs inside Roblox. Run them yourself in
-Studio. Treat any claim about test results as unverified.
+It cannot click the Studio plugin button. Run the suite yourself (**Plugins**
+→ **Medieval Game Tests** → **Run Tests**) and treat any claim about test
+results Claude makes as unverified until you do.
 
 ---
 

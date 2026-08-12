@@ -16,9 +16,20 @@ ServerScriptService
   Tests/             tests/                          Jest suite (development project only)
 
 StarterPlayer/StarterPlayerScripts
-  Client             src/client/init.client.luau     the only self-starting client script
+  Client             src/client/init.client.luau     the only self-starting client script,
+                     (via src/client.project.json)    and the one LocalScript in the tree
     Controllers/     src/client/Controllers          presentation, input, UI logic
 ```
+
+`Client` is a `LocalScript`, not a `Script` with `RunContext`, even though
+`emitLegacyScripts` is off for the rest of the project. `src/client.project.json`
+is a nested Rojo project that scopes `emitLegacyScripts: true` to just that
+subtree — Roblox copies every Starter container's contents into each player's
+`PlayerScripts`, so a `RunContext`-based `Script` parented directly under
+`StarterPlayerScripts` runs twice, and Roblox's own guidance is to use a
+`LocalScript` there instead. See `docs/decisions.md` for the full reasoning.
+Nothing about `src/client/init.client.luau` or `Controllers/` changes because
+of this — it is a Rojo-mapping detail, not an architecture one.
 
 ## The three layers
 

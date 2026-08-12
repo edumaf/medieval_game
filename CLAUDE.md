@@ -27,8 +27,11 @@ src/server/     ServerScriptService.Server        authoritative gameplay
 src/client/     StarterPlayerScripts.Client       presentation and input
   init.client.luau      entry point
   Controllers/          one file per system, including UI logic
+src/client.project.json  nested Rojo project — the ONLY LocalScript in the tree;
+                          everything else is Script+RunContext (see below)
 tests/          ServerScriptService.Tests (dev project only)   Jest specs
 scripts/        Lune scripts for repository automation — not game code
+plugin/         Studio plugin that runs Jest locally — not synced by Rojo
 docs/           architecture, workflows, tooling decisions
 assets/         reviewable assets only; the map is NOT here
 ```
@@ -56,15 +59,19 @@ globally or changing a pin without being asked.
 Run after any code change:
 
 ```bash
-stylua src tests scripts                       # format (do this first)
-selene src tests scripts                       # lint
+stylua src tests scripts plugin                # format (do this first)
+selene src tests scripts plugin                # lint
 rojo sourcemap default.project.json --output sourcemap.json
 luau-lsp analyze --platform=roblox --sourcemap=sourcemap.json \
   --definitions=.tooling/globalTypes.d.luau --base-luaurc=.luaurc \
-  --ignore="**/Packages/**" --ignore="**/DevPackages/**" src tests
+  --ignore="**/Packages/**" --ignore="**/DevPackages/**" src tests plugin
 lune run scripts/validate-project              # Rojo mappings, pins, lockfile
 rojo build default.project.json --output build/dev.rbxl
 ```
+
+(`scripts/` is deliberately not part of the `luau-lsp analyze` target — it uses
+Lune's runtime, not the Roblox API surface `--definitions` provides. StyLua and
+Selene still cover it.)
 
 Setup, if the working copy is fresh or manifests changed:
 
@@ -79,9 +86,23 @@ lune run scripts/fetch-global-types
 `wally-package-types` is not idempotent — run `wally install` again before
 re-running it, never twice in a row.
 
-You **cannot** run the test suite — Jest Lua only runs inside Roblox Studio or
-via the Open Cloud workflow. Write tests, then tell the human to run them.
-Never claim tests passed.
+**Jest does not run automatically, anywhere, ever.** There is no Play-mode test
+runner — it was removed because it cannot work: Jest's module isolation needs
+the `PluginOrOpenCloud` capability, which an ordinary Play-mode script never
+has. The three places tests actually run:
+
+- **Local unit tests** — a human clicks **Plugins → Medieval Game Tests → Run
+  Tests** in Studio (`plugin/JestRunner.luau`). You cannot click this button.
+- **Gameplay tests** — a human presses Play and plays the game by hand. This
+  is unrelated to Jest and was never a test runner.
+- **CI tests** — Open Cloud runs the suite headlessly on every PR
+  (`.github/workflows/roblox-tests.yml`). You cannot trigger or watch this
+  either.
+
+You **cannot** run the test suite through any of these paths. Write tests,
+then tell the human to run them from the Studio plugin. If you have not seen
+actual Jest output, report the tests as **unverified** — never say a test
+passed, and never imply Play mode ran them.
 
 ## Coding rules
 
@@ -158,7 +179,18 @@ Never claim tests passed.
   `Shared`, `Server`, `Tests` or `Client` are destroyed on the next sync.
 - The map, terrain and `StarterGui` are **not** in this repository and never
   will be. Do not generate map geometry or build UI layout in code.
-- `emitLegacyScripts` is off, so `.client.luau` becomes a `Script` with
-  `RunContext = Client`, not a `LocalScript`. That is intentional.
+- `emitLegacyScripts` is off at the root, so `.server.luau`/`.client.luau`
+  normally become `Script` instances with `RunContext` set, not
+  `LocalScript`/legacy `Script`. **`src/client` is the one exception**:
+  `src/client.project.json` scopes `emitLegacyScripts: true` to just that
+  subtree, so `StarterPlayerScripts.Client` is a real `LocalScript`. This is
+  not an oversight — a `RunContext = Client` `Script` parented directly under
+  `StarterPlayerScripts` runs twice (Roblox copies Starter containers into
+  each player's `PlayerScripts`, so both the template and the copy execute).
+  See `docs/decisions.md`. Never "fix" `src/client.project.json` back to
+  matching the root setting.
 - `tests/` and `DevPackages` exist only in `default.project.json`.
   `build.project.json` is the production tree.
+- `plugin/` is never synced by Rojo and is not in either `.project.json` — it
+  is a standalone script installed directly into Studio's local Plugins
+  folder via `lune run scripts/install-test-plugin`.

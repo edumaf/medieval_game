@@ -16,18 +16,20 @@ Branch prefixes: `feature/`, `fix/`, `refactor/`, `chore/`.
 ## Before you push
 
 ```bash
-stylua src tests scripts
-selene src tests scripts
+stylua src tests scripts plugin
+selene src tests scripts plugin
 rojo sourcemap default.project.json --output sourcemap.json
 luau-lsp analyze --platform=roblox --sourcemap=sourcemap.json \
   --definitions=.tooling/globalTypes.d.luau --base-luaurc=.luaurc \
-  --ignore="**/Packages/**" --ignore="**/DevPackages/**" src tests
+  --ignore="**/Packages/**" --ignore="**/DevPackages/**" src tests plugin
 lune run scripts/validate-project
 rojo build build.project.json --output build/medieval-game.rbxl
 ```
 
-Then run the tests in Studio (press Play) and play-test your change. CI cannot
-do either of those for you.
+Then run the unit tests from the Studio plugin (**Plugins** → **Medieval Game
+Tests** → **Run Tests** — not by pressing Play, see
+[`docs/testing.md`](docs/testing.md)) and play-test your change separately.
+CI cannot do either of those for you.
 
 ## Pull requests
 
