@@ -1,0 +1,34 @@
+# Project toolchain.
+#
+# Every developer and CI run uses exactly these versions. After cloning, run:
+#
+#     rokit install
+#
+# Versions are pinned deliberately. Do not change them ad-hoc — follow the
+# toolchain update process in docs/toolchain.md.
+
+[tools]
+# Syncs the filesystem into Roblox Studio. The core of our workflow.
+rojo = "rojo-rbx/rojo@7.7.0"
+
+# Package manager for Roblox/Luau dependencies.
+wally = "UpliftGames/wally@0.3.2"
+
+# Restores exported Luau types onto Wally's generated link files, which Wally
+# itself strips. Without this, types from packages do not survive `require`.
+wally-package-types = "JohnnyMorganz/wally-package-types@1.6.2"
+
+# Linter. Understands Roblox globals and catches real bugs (typos, undefined
+# globals, unreachable code) before they reach Studio.
+selene = "Kampfkarren/selene@0.31.0"
+
+# Deterministic code formatter. Ends all formatting debate.
+stylua = "JohnnyMorganz/StyLua@2.5.2"
+
+# Luau language server. Provides editor intelligence and the `analyze`
+# subcommand we use as a type-checking gate in CI.
+luau-lsp = "JohnnyMorganz/luau-lsp@1.69.0"
+
+# Standalone Luau runtime. Runs our repository automation (scripts/) so that
+# tooling is written in the same language as the game.
+lune = "lune-org/lune@0.10.5"

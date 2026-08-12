@@ -1,0 +1,70 @@
+name: Bug report
+description: Something behaves incorrectly in game or in the tooling.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: check that your branch is up to date with `main` and that
+        you have run `rokit install` and `wally install` since your last pull.
+
+  - type: textarea
+    id: what-happens
+    attributes:
+      label: What happens
+      description: What you observed, including any Output window errors.
+      placeholder: |
+        The client logs "build mismatch" every time I join, even on a fresh clone.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Numbered steps someone else can follow exactly.
+      placeholder: |
+        1. `git checkout main && git pull`
+        2. `rojo serve`
+        3. Connect in Studio, press Play
+        4. Look at the Output window
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where does it happen?
+      options:
+        - Server code
+        - Client code
+        - Shared code
+        - Rojo / Studio sync
+        - Toolchain (Rokit, Wally, Selene, StyLua)
+        - CI / GitHub Actions
+        - Map or environment in Studio
+        - UI
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: branch
+    attributes:
+      label: Branch and commit
+      description: Output of `git branch --show-current` and `git rev-parse --short HEAD`.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Roblox Studio version, and the output of `rokit list` if tooling is involved.

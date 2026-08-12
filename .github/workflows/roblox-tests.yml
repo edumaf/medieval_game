@@ -1,0 +1,75 @@
+name: Roblox tests
+
+# Runs the Jest suite inside a real Roblox server using the Open Cloud Luau
+# Execution API. This is the only way to execute Roblox code headlessly — Jest
+# Lua cannot run outside Roblox, and CI has no Roblox Studio.
+#
+# It stays a separate workflow from CI because it needs credentials that a fork
+# will not have, and because it is slower. Make it a required check only after
+# you have seen it pass at least once (see docs/testing.md).
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: roblox-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ROKIT_VERSION: "1.2.0"
+
+jobs:
+  jest:
+    name: Jest (Open Cloud)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    # Skips cleanly — rather than failing — until an administrator configures
+    # the repository variables. Pull requests from forks cannot read secrets,
+    # so they skip too.
+    if: vars.ROBLOX_UNIVERSE_ID != '' && github.event.pull_request.head.repo.fork != true
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v6
+
+      - name: Restore toolchain cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.rokit
+          key: rokit-${{ runner.os }}-${{ hashFiles('rokit.toml') }}
+
+      - name: Install Rokit
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/rokit.zip \
+            "https://github.com/rojo-rbx/rokit/releases/download/v${ROKIT_VERSION}/rokit-${ROKIT_VERSION}-linux-x86_64.zip"
+          unzip -qo /tmp/rokit.zip -d /tmp/rokit
+          /tmp/rokit/rokit self-install
+          echo "$HOME/.rokit/bin" >> "$GITHUB_PATH"
+
+      - name: Install the project toolchain
+        run: rokit install --no-trust-check
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Install dependencies
+        run: wally install
+
+      - name: Build the test place
+        run: |
+          mkdir -p build
+          rojo build default.project.json --output build/test-place.rbxl
+
+      - name: Run the suite in Roblox
+        run: lune run scripts/open-cloud-tests
+        env:
+          ROBLOX_OPEN_CLOUD_KEY: ${{ secrets.ROBLOX_OPEN_CLOUD_KEY }}
+          ROBLOX_UNIVERSE_ID: ${{ vars.ROBLOX_UNIVERSE_ID }}
+          ROBLOX_TEST_PLACE_ID: ${{ vars.ROBLOX_TEST_PLACE_ID }}

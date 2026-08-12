@@ -1,0 +1,25 @@
+{
+  "files.eol": "\n",
+  "files.insertFinalNewline": true,
+  "files.trimTrailingWhitespace": true,
+
+  "[luau]": {
+    "editor.defaultFormatter": "JohnnyMorganz.stylua",
+    "editor.formatOnSave": true
+  },
+
+  // Keeps the sourcemap fresh so the language server can resolve
+  // `ReplicatedStorage.Shared.Config` to the real file on disk.
+  "luau-lsp.sourcemap.enabled": true,
+  "luau-lsp.sourcemap.autogenerate": true,
+  "luau-lsp.sourcemap.rojoProjectFile": "default.project.json",
+
+  "luau-lsp.platform.type": "roblox",
+  "luau-lsp.types.roblox": true,
+
+  // Wally's _Index folder holds one copy of every transitive dependency.
+  // Indexing it is slow and its diagnostics are not ours to fix.
+  "luau-lsp.ignoreGlobs": ["**/_Index/**", "**/DevPackages/**", "**/Packages/**"],
+
+  "stylua.searchParentDirectories": true
+}

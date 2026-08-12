@@ -1,0 +1,51 @@
+name: Feature request
+description: Propose a new system or a change to an existing one.
+labels: [feature]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the player-facing or developer-facing problem, not the solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed approach
+      description: |
+        Roughly how you would build it. Name the systems it touches.
+        If it needs a new remote, say which data crosses the boundary.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: layer
+    attributes:
+      label: Which layer does this live in?
+      multiple: true
+      options:
+        - Server (authoritative gameplay state)
+        - Client (presentation, input, UI)
+        - Shared (types, config, utilities)
+        - Studio (map, environment, UI layout)
+        - Tooling / CI
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: New dependencies
+      description: |
+        Does this need a new Wally package or tool? Which one, and why can it
+        not be done with what we already have? Leave blank if none.
+
+  - type: textarea
+    id: risks
+    attributes:
+      label: Exploit and performance risks
+      description: |
+        If the client can influence this, say how the server will validate it.
+        If it runs per frame or per player, say roughly how often.

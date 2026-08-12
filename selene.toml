@@ -1,0 +1,29 @@
+# Selene lint configuration.
+#
+# Run with:  selene src tests scripts
+#
+# `std = "roblox"` makes Selene aware of every Roblox global and API member. The
+# definition file (roblox.yml) is generated on demand by
+# `selene generate-roblox-std`; it is gitignored because it is derived from the
+# live Roblox API dump and would otherwise go stale in review.
+std = "roblox"
+
+# Wally-installed packages are third-party code. We do not lint them and we do
+# not fix their warnings.
+exclude = ["Packages/**", "ServerPackages/**", "DevPackages/**"]
+
+[lints]
+# An undefined global in Roblox Luau is nearly always a typo or a missing
+# require. Treat it as a hard failure rather than a warning.
+undefined_variable = "deny"
+
+# `_G` and `shared` are hidden global state that breaks across scripts and makes
+# behaviour untestable. Pass values explicitly through modules instead.
+global_usage = "deny"
+
+# Multiple returns silently collapsing into a single argument is a classic
+# Roblox bug (e.g. `warn(pcall(f))`).
+unbalanced_assignments = "deny"
+
+# Catches `if x == nil and x == 5` style contradictions.
+almost_swapped = "deny"

@@ -1,0 +1,44 @@
+{
+  "name": "medieval-game-dev",
+  "emitLegacyScripts": false,
+  "globIgnorePaths": ["**/*.md", "**/.DS_Store", "**/.gitkeep"],
+  "tree": {
+    "$className": "DataModel",
+
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "Shared": {
+        "$path": "src/shared"
+      },
+      "Packages": {
+        "$path": { "optional": "Packages" }
+      },
+      "DevPackages": {
+        "$path": { "optional": "DevPackages" }
+      }
+    },
+
+    "ServerScriptService": {
+      "$className": "ServerScriptService",
+      "Server": {
+        "$path": "src/server"
+      },
+      "ServerPackages": {
+        "$path": { "optional": "ServerPackages" }
+      },
+      "Tests": {
+        "$path": "tests"
+      }
+    },
+
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "Client": {
+          "$path": "src/client"
+        }
+      }
+    }
+  }
+}

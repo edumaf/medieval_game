@@ -1,0 +1,24 @@
+[package]
+name = "edumaf/medieval-game"
+version = "0.1.0"
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+license = "UNLICENSED"
+
+# This is a game, not a library. `private` makes `wally publish` refuse to run
+# so nobody can accidentally push our source to the public registry.
+private = true
+
+# Runtime dependencies land in ReplicatedStorage.Packages.
+# Empty on purpose: the infrastructure needs nothing at runtime yet.
+# See docs/dependencies.md before adding anything here.
+[dependencies]
+
+# Server-only dependencies land in ServerScriptService.ServerPackages.
+[server-dependencies]
+
+# Tooling that must never ship in a production build. Lands in DevPackages,
+# which is only mapped by default.project.json (the development project).
+[dev-dependencies]
+Jest = "jsdotlua/jest@3.10.0"
+JestGlobals = "jsdotlua/jest-globals@3.10.0"

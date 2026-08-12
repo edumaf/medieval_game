@@ -1,0 +1,12 @@
+{
+  "recommendations": [
+    // Types, autocomplete and go-to-definition for Luau.
+    "JohnnyMorganz.luau-lsp",
+    // Formats on save with our stylua.toml.
+    "JohnnyMorganz.stylua",
+    // Shows Selene lints inline instead of only in CI.
+    "Kampfkarren.selene-vscode",
+    // Start and stop the Rojo server from the editor.
+    "evaera.vscode-rojo"
+  ]
+}
