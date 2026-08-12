@@ -1,0 +1,7 @@
+{
+  "name": "medieval-game-client",
+  "emitLegacyScripts": true,
+  "tree": {
+    "$path": "client"
+  }
+}
