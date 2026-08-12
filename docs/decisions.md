@@ -167,3 +167,35 @@ We looked at nesting the client script one level deeper inside
 script "parented to a container." We could not find anything confirming that
 depth changes Roblox's copy-and-run behavior (as opposed to just the
 warning), so we did not rely on it.
+
+## Sprinting (`RunningController`) is client-only, for now
+
+`src/client/Controllers/RunningController/` sets `Humanoid.WalkSpeed` locally
+in response to Left Shift, with no remote involved. This works — and reaches
+the server and other clients — because player characters are
+client-network-owned by default, so a client's own changes to its Humanoid's
+movement properties already replicate outward.
+
+This is deliberately client-authoritative, not an oversight. Right now
+nothing in the game (no stamina, no combat, no speed-gated rewards or
+anti-cheat) gives a modified client anything to gain by reporting a false
+speed, so there is nothing yet for the server to validate. **The first system
+that cares whether a player is "really" sprinting — stamina, combat, a
+speed-dependent reward, movement-based anti-cheat — needs to make speed
+server-authoritative**: track sprint intent server-side (a `RemoteEvent`
+declared in `Shared/Net/Remotes.luau`, validated like every other handler —
+see `SessionService`) and either clamp or reject a `Humanoid.WalkSpeed` the
+server did not expect, rather than trusting the client's number. Do not
+retrofit that ahead of needing it.
+
+Respawn behavior: if Left Shift is still held when a character respawns, the
+new character starts sprinting immediately — `RunningController` only swaps
+which `Humanoid` it applies the existing sprint-intent state to, it does not
+reset that state on death. Input connections are made once, in `Start()`; a
+respawn never reconnects anything, so there is nothing to leak or duplicate.
+
+The state transitions (`SprintState.luau`, beside the controller) are covered
+by `tests/client/RunningController/SprintState.spec.luau` — they need no
+Humanoid or input device, so they are pure Jest unit tests rather than a
+Studio play-test. The actual key handling and `Humanoid.WalkSpeed` effect can
+only be verified by hand in Studio.
