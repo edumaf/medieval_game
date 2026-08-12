@@ -1,0 +1,24 @@
+# StyLua formatting configuration — the single source of truth for code style.
+#
+# Format:  stylua src tests scripts
+# Check:   stylua --check src tests scripts   (this is what CI runs)
+#
+# Do not argue about style in code review. If the formatter accepts it, it is
+# correct. If you want to change the style, change it here in its own PR.
+
+syntax = "Luau"
+column_width = 100
+line_endings = "Unix"
+indent_type = "Tabs"
+indent_width = 4
+quote_style = "AutoPreferDouble"
+call_parentheses = "Always"
+
+# Keep `if x then return end` expanded over multiple lines. Single-line control
+# flow hides early returns during review.
+collapse_simple_statement = "Never"
+
+[sort_requires]
+# Keeps the require block at the top of every file in a stable order, so two
+# people adding an import never conflict on the same line.
+enabled = true

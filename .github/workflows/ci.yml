@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# This workflow only reads the repository. It never needs write access, so it
+# does not get any.
+permissions:
+  contents: read
+
+# A second push to the same branch cancels the first — no point burning minutes
+# on a commit nobody will merge.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Must match the Rokit version the team installs locally. Rokit itself is not
+  # in rokit.toml (it is the thing that reads it), so it is pinned here.
+  ROKIT_VERSION: "1.2.0"
+
+jobs:
+  validate:
+    name: Lint, type-check and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v6
+
+      - name: Restore toolchain cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.rokit
+          key: rokit-${{ runner.os }}-${{ hashFiles('rokit.toml') }}
+
+      - name: Install Rokit
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/rokit.zip \
+            "https://github.com/rojo-rbx/rokit/releases/download/v${ROKIT_VERSION}/rokit-${ROKIT_VERSION}-linux-x86_64.zip"
+          unzip -qo /tmp/rokit.zip -d /tmp/rokit
+          /tmp/rokit/rokit self-install
+          echo "$HOME/.rokit/bin" >> "$GITHUB_PATH"
+
+      - name: Install the project toolchain
+        run: rokit install --no-trust-check
+        env:
+          # Raises Rokit's GitHub rate limit. Read-only, scoped to this run.
+          GITHUB_TOKEN: ${{ github.token }}
+
+      # Caches Wally's registry index and download cache, NOT the generated
+      # Packages folders. Those must be regenerated every run: the link files
+      # inside them are rewritten in place by wally-package-types, which is not
+      # idempotent, so a restored copy would be corrupt on the second run.
+      - name: Restore Wally download cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.wally
+          key: wally-${{ runner.os }}-${{ hashFiles('wally.lock') }}
+          restore-keys: wally-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: wally install
+
+      - name: Verify the lockfile is committed and current
+        run: |
+          if ! git diff --exit-code --quiet -- wally.lock; then
+            echo "::error file=wally.lock::wally.lock changed during install. Run 'wally install' locally and commit the result."
+            git --no-pager diff -- wally.lock
+            exit 1
+          fi
+
+      - name: Generate the instance sourcemap
+        run: rojo sourcemap default.project.json --output sourcemap.json
+
+      - name: Restore Luau types onto Wally packages
+        run: wally-package-types --sourcemap sourcemap.json DevPackages/
+
+      - name: Check formatting
+        run: stylua --check src tests scripts
+
+      - name: Lint
+        run: |
+          selene generate-roblox-std
+          selene src tests scripts
+
+      - name: Fetch Roblox API definitions
+        run: lune run scripts/fetch-global-types
+
+      - name: Type-check
+        run: |
+          luau-lsp analyze \
+            --platform=roblox \
+            --sourcemap=sourcemap.json \
+            --definitions=.tooling/globalTypes.d.luau \
+            --base-luaurc=.luaurc \
+            --ignore="**/Packages/**" \
+            --ignore="**/ServerPackages/**" \
+            --ignore="**/DevPackages/**" \
+            src tests
+
+      - name: Validate repository structure
+        run: lune run scripts/validate-project
+
+      - name: Build both places
+        run: |
+          mkdir -p build
+          rojo build default.project.json --output build/dev.rbxl
+          rojo build build.project.json --output build/medieval-game.rbxl
+
+      - name: Upload built places
+        uses: actions/upload-artifact@v6
+        with:
+          name: places
+          path: build/*.rbxl
+          retention-days: 7

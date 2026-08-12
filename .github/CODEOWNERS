@@ -1,0 +1,31 @@
+# CODEOWNERS — who is automatically requested for review.
+#
+# ACTION REQUIRED: replace every @your-org/... placeholder below with real
+# GitHub usernames (e.g. @alice) or team slugs (e.g. @your-org/engineers).
+# Until you do, GitHub silently ignores the entries.
+#
+# A user must have write access to the repository to be a valid code owner.
+# Combine this with the "Require review from Code Owners" branch protection
+# setting described in docs/github-setup.md.
+
+# Fallback owner for anything not matched below.
+*                       @your-org/maintainers
+
+# Gameplay and shared code.
+/src/                   @your-org/engineers
+
+# Toolchain, CI and repository configuration. Changes here affect everyone, so
+# keep the reviewer set narrow.
+/.github/               @your-org/maintainers
+/rokit.toml             @your-org/maintainers
+/wally.toml             @your-org/maintainers
+/wally.lock             @your-org/maintainers
+/selene.toml            @your-org/maintainers
+/stylua.toml            @your-org/maintainers
+/default.project.json   @your-org/maintainers
+/build.project.json     @your-org/maintainers
+/scripts/               @your-org/maintainers
+
+# The AI development contract. Changing it changes how every Claude Code session
+# in this repository behaves.
+/CLAUDE.md              @your-org/maintainers

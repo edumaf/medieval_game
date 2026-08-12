@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Onboarding and workflow questions
+    url: https://github.com/edumaf/medieval_game/blob/main/README.md
+    about: Setup, Rojo, Studio, Git and Claude Code are all covered in the README.
+  - name: Something is broken in your setup
+    url: https://github.com/edumaf/medieval_game/blob/main/README.md#troubleshooting
+    about: Check the troubleshooting section before filing an issue.

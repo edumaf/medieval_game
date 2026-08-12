@@ -1,0 +1,16 @@
+version: 2
+
+updates:
+  # Keeps the GitHub Actions we use current. Rokit tools and Wally packages are
+  # NOT covered by Dependabot — it does not understand rokit.toml or wally.toml.
+  # Update those by hand following docs/toolchain.md and docs/dependencies.md.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "chore"
+    labels:
+      - chore
+      - dependencies
+    open-pull-requests-limit: 3

@@ -1,0 +1,27 @@
+# Normalise line endings so Windows and macOS/Linux developers never produce
+# whitespace-only diffs. StyLua is configured for Unix line endings.
+* text=auto eol=lf
+
+# Windows-only tooling that must keep CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Roblox binary formats. Marking them binary prevents Git from corrupting them
+# and stops it from attempting (always useless) line-based merges.
+*.rbxl  binary
+*.rbxlx binary
+*.rbxm  binary
+*.rbxmx binary
+
+# Media assets.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.ogg  binary
+*.mp3  binary
+*.wav  binary
+*.fbx  binary
+
+# Generated — collapse in pull request diffs so reviewers see real changes.
+wally.lock linguist-generated=true
