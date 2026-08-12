@@ -17,8 +17,8 @@ local process = require("@lune/process")
 local serde = require("@lune/serde")
 local stdio = require("@lune/stdio")
 
-local PROJECT_FILES = { "default.project.json", "build.project.json" }
-local SOURCE_DIRECTORIES = { "src", "tests", "scripts" }
+local PROJECT_FILES = { "default.project.json", "build.project.json", "src/client.project.json" }
+local SOURCE_DIRECTORIES = { "src", "tests", "scripts", "plugin" }
 
 local problems: { string } = {}
 
@@ -27,18 +27,46 @@ local function fail(message: string)
 end
 
 --[[
+	Every `$path` in a Rojo project file is relative to that project file's own
+	directory, not the repository root — which only matters once a nested
+	project file (like src/client.project.json) lives somewhere other than the
+	root. Returns "" for a file at the repository root.
+]]
+local function directoryOf(filePath: string): string
+	local lastSlash = nil
+	for index = #filePath, 1, -1 do
+		if string.sub(filePath, index, index) == "/" then
+			lastSlash = index
+			break
+		end
+	end
+	if lastSlash == nil then
+		return ""
+	end
+	return string.sub(filePath, 1, lastSlash - 1)
+end
+
+local function resolve(baseDir: string, path: string): string
+	if baseDir == "" then
+		return path
+	end
+	return `{baseDir}/{path}`
+end
+
+--[[
 	Walks a Rojo project tree and confirms every `$path` resolves. Paths written
 	as `{ "optional": "..." }` are allowed to be missing — that is how we mount
 	Wally output folders that only exist after `wally install`.
 ]]
-local function checkProjectPaths(node: any, projectFile: string, trail: string)
+local function checkProjectPaths(node: any, projectFile: string, baseDir: string, trail: string)
 	if type(node) ~= "table" then
 		return
 	end
 
 	local path = node["$path"]
 	if type(path) == "string" then
-		if not fs.isFile(path) and not fs.isDir(path) then
+		local fullPath = resolve(baseDir, path)
+		if not fs.isFile(fullPath) and not fs.isDir(fullPath) then
 			fail(`{projectFile}: {trail} maps to "{path}", which does not exist`)
 		end
 	elseif type(path) == "table" then
@@ -51,7 +79,7 @@ local function checkProjectPaths(node: any, projectFile: string, trail: string)
 
 	for key, value in node do
 		if type(key) == "string" and string.sub(key, 1, 1) ~= "$" then
-			checkProjectPaths(value, projectFile, `{trail}.{key}`)
+			checkProjectPaths(value, projectFile, baseDir, `{trail}.{key}`)
 		end
 	end
 end
@@ -69,7 +97,7 @@ local function checkProjectFiles()
 			continue
 		end
 
-		checkProjectPaths((decoded :: any).tree, projectFile, "tree")
+		checkProjectPaths((decoded :: any).tree, projectFile, directoryOf(projectFile), "tree")
 	end
 end
 

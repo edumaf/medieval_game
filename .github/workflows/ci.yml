@@ -81,12 +81,12 @@ jobs:
         run: wally-package-types --sourcemap sourcemap.json DevPackages/
 
       - name: Check formatting
-        run: stylua --check src tests scripts
+        run: stylua --check src tests scripts plugin
 
       - name: Lint
         run: |
           selene generate-roblox-std
-          selene src tests scripts
+          selene src tests scripts plugin
 
       - name: Fetch Roblox API definitions
         run: lune run scripts/fetch-global-types
@@ -101,7 +101,7 @@ jobs:
             --ignore="**/Packages/**" \
             --ignore="**/ServerPackages/**" \
             --ignore="**/DevPackages/**" \
-            src tests
+            src tests plugin
 
       - name: Validate repository structure
         run: lune run scripts/validate-project
