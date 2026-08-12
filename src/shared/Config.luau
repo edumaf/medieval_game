@@ -24,6 +24,13 @@ local Config = {
 		on a system; leave it at "info" on main.
 	]]
 	LogLevel = "info" :: LogLevel,
+
+	--[[
+		Humanoid.WalkSpeed while walking normally and while sprinting (Left
+		Shift held). See src/client/Controllers/RunningController.
+	]]
+	NormalWalkSpeed = 16,
+	SprintWalkSpeed = 24,
 }
 
 return table.freeze(Config)
