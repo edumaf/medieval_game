@@ -25,6 +25,9 @@ tests/
   shared/
     Config.spec.luau
     Logger.spec.luau
+  server/
+    HealthService/
+      HealthState.spec.luau
 ```
 
 Rojo maps `tests/` to `ServerScriptService.Tests`, and only in
@@ -108,7 +111,34 @@ reconnect Rojo. The button also refuses to run while you are in Play mode — it
 tests the Edit-mode project, not the live session, so running both together
 would be misleading rather than useful.
 
-## Running them in CI
+## Manual verification: Health system
+
+`HealthService`'s numeric rules are covered by
+`tests/server/HealthService/HealthState.spec.luau`, but the Humanoid
+integration — spawning, damage/heal through the Studio-only chat commands,
+death, and respawn — can only be checked by hand in Studio (see
+`docs/decisions.md` for why `HealthService` keeps its own state instead of
+trusting `Humanoid.Health` directly). There is no Combat system yet, so the
+manual mechanism is `/damage <amount>` and `/heal <amount>` typed in chat;
+both are no-ops outside Studio (`RunService:IsStudio()`).
+
+1. Start `rojo serve`, connect Studio, press **Play**.
+2. Confirm the server and client each log `boot complete` exactly once.
+3. Type `/damage 20` in chat. Confirm health drops to 80 (Output logs the
+   result; a health bar is not part of this feature yet).
+4. Type `/damage 500`. Confirm health lands at exactly 0, not negative.
+5. Confirm the character dies exactly once — one ragdoll, one `Humanoid.Died`
+   log line, not repeated.
+6. Type `/heal 50` while dead. Confirm nothing happens — a dead character
+   cannot be healed.
+7. Respawn. Confirm the new character starts at 100 health.
+8. Type `/heal 30`. Confirm health is clamped at 100, not above it.
+9. Repeat damage/heal/death/respawn a few times. Confirm no duplicate
+   `HealthChanged`/`Died` connections (watch for doubled log lines) and no
+   stale state from a previous character.
+10. With a second player in the server, damage one player and confirm the
+    other player's health is unaffected.
+11. Check Output for errors or warnings throughout.
 
 Jest Lua only runs inside Roblox, and CI has no Roblox Studio. The supported way
 to run tests headlessly is Roblox's **Open Cloud Luau Execution API**, which
