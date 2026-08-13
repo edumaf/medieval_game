@@ -59,4 +59,51 @@ describe("Shared.Config", function()
 		expect(Config.PunchLagCompensationSeconds >= 0).toBe(true)
 		expect(Config.PunchLagCompensationSeconds <= 0.5).toBe(true)
 	end)
+
+	it("states the parry animation as an asset id, or as no animation at all", function()
+		-- Same failure mode as the punch animation: a malformed id loads a
+		-- track that plays nothing, so the "Hold" marker never arrives and the
+		-- parry winds up forever without ever protecting anyone. Empty is the
+		-- supported "no animation" state, which ParryController handles by
+		-- reaching the guard on the key press.
+		expect(Config.ParryAnimationId).toEqual(expect.any("string"))
+		if Config.ParryAnimationId ~= "" then
+			expect(string.match(Config.ParryAnimationId, "^rbxassetid://%d+$")).never.toBeNil()
+		end
+	end)
+
+	it("names a hold marker for ParryController to bind", function()
+		expect(Config.ParryHoldMarkerName).toEqual(expect.any("string"))
+		expect(#Config.ParryHoldMarkerName > 0).toBe(true)
+	end)
+
+	it("guards at least the forward hemisphere and never the back", function()
+		-- Below 0 the guard would start covering directions behind the
+		-- defender, which is the "invulnerable from everywhere" failure the
+		-- feature is defined against. Above 1 nothing could ever be parried.
+		expect(Config.ParryMinFacingDot >= 0).toBe(true)
+		expect(Config.ParryMinFacingDot <= 1).toBe(true)
+	end)
+
+	it("makes parrying slower than walking", function()
+		-- The slowdown is what the protection costs. A parry speed at or above
+		-- the walking speed would make guarding strictly better than not
+		-- guarding, and one at or below zero would root the player in place.
+		expect(Config.ParryWalkSpeed > 0).toBe(true)
+		expect(Config.ParryWalkSpeed < Config.NormalWalkSpeed).toBe(true)
+	end)
+
+	it("keeps sprinting faster than walking, and walking faster than guarding", function()
+		-- The precedence RunningController applies, asserted as an ordering so
+		-- retuning any one of the three cannot silently invert it.
+		expect(Config.ParryWalkSpeed < Config.NormalWalkSpeed).toBe(true)
+		expect(Config.NormalWalkSpeed < Config.SprintWalkSpeed).toBe(true)
+	end)
+
+	it("bounds parry attempts without getting in a player's way", function()
+		-- A flood bound on ParryStateRequest, not a gameplay cooldown: it has
+		-- to be short enough that no honest key press ever reaches it.
+		expect(Config.ParryMinAttemptSeconds > 0).toBe(true)
+		expect(Config.ParryMinAttemptSeconds <= 0.25).toBe(true)
+	end)
 end)

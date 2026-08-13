@@ -26,6 +26,7 @@ tests/
     Config.spec.luau
     Logger.spec.luau
     Combat/
+      ParryState.spec.luau
       PunchRules.spec.luau
   server/
     DeveloperAccess.spec.luau
@@ -408,3 +409,117 @@ dummy, because the whole effect comes from B's position being replicated to A.
 26. Stand still, both of you, and punch at normal range. Confirm it behaves
     exactly as it did before — a stationary target gets no allowance at all,
     so any change in feel here means something is wrong.
+
+## Manual verification: Parry
+
+`ParryState` covers the phases and the direction test in
+`tests/shared/Combat/ParryState.spec.luau`, and the movement precedence is in
+`tests/client/RunningController/SprintState.spec.luau`. What no unit test can
+cover is the Q key, the animation, the `Hold` marker, the frozen pose, and a
+punch actually being stopped between two real characters — so most of this
+needs two players.
+
+Use **Test → Clients and Servers** with 2 players, or Team Test if you are on
+separate machines.
+
+**Important:** `Config.ParryAnimationId` is `rbxassetid://82891306050913` and
+its `Hold` marker is what raises the guard. Nothing in the repository can check
+that the marker exists inside the published asset — step 3 is that check. If it
+is missing or misspelled, the parry winds up forever: slowed, unable to punch,
+never protected, and **nothing appears in Output**. Blanking the id is still the
+supported "no animation" state, in which the guard is reached on the key press
+instead; skip steps 2–4 if you have done that.
+
+**Basic parry**
+
+1. Hold Q. Confirm the parry animation starts.
+2. Confirm it reaches its `Hold` position.
+3. Keep Q held. Confirm the character **stays** in the Hold pose rather than
+   playing on to the end, snapping back to idle, or looping the wind-up. A
+   looping or restarting animation here means the track is not being frozen.
+4. Still holding Q, walk around with WASD. Confirm the character moves and the
+   guard pose stays up.
+5. Confirm movement is visibly slower than normal (8 against 16).
+6. Release Q. Confirm the pose is dropped cleanly and movement returns to 16.
+
+**Front attacks** — B holds Q and is in the Hold pose throughout
+
+7. A punches B from directly in front. Confirm **0 damage**: B's health bar does
+   not move, and Output logs `B parried A`.
+8. Repeat from B's front-left. Confirm 0 damage.
+9. Repeat from B's front-right. Confirm 0 damage.
+10. Punch B repeatedly from the front for several seconds. Confirm B's health
+    never drops at all.
+
+**Rear attacks** — B holds Q and is in the Hold pose throughout
+
+11. A punches B from directly behind. Confirm B takes the **normal 25** and
+    Output logs `A punched B for 25 -> 75`.
+12. Repeat from B's back-left. Confirm 25.
+13. Repeat from B's back-right. Confirm 25.
+14. Have B turn to face A while A keeps punching. Confirm damage stops landing
+    the moment B is facing them — the arc follows B's character, not the world.
+
+**The wind-up is not protected**
+
+15. Have B press Q and have A punch **immediately**, before B's animation
+    reaches Hold. Confirm B takes 25. Protection starts at the marker, not at
+    the key press.
+16. Have B tap Q and release it before Hold. Confirm B was never protected, the
+    animation stops cleanly, and B's speed returns to 16.
+
+**Normal combat is unchanged**
+
+17. With nobody holding Q, confirm a punch still deals 25 from the front.
+18. Confirm the 120-degree cone still works: punching someone directly behind
+    you still does nothing.
+19. Confirm the range still works: back off past about 4.5 studs from a
+    stationary target and confirm the punch misses.
+20. Confirm the cooldown still works: click as fast as you can, and confirm
+    damage lands at most about twice a second.
+21. Re-run the chase from step 21 of the punch matrix above. Lag compensation
+    must behave exactly as it did before.
+
+**Punching while parrying**
+
+22. Hold Q and left click. Confirm **no swing plays at all** and no damage is
+    dealt.
+23. Press Q and click during the wind-up, before Hold. Confirm still no swing —
+    the lockout starts at the key press.
+24. Release Q and click. Confirm punching works again immediately.
+
+**Edge cases**
+
+25. Die while holding Q. Confirm the pose is dropped and nothing is left
+    guarding.
+26. Respawn. Confirm the new character is **not** parrying even if you never
+    released Q, and that pressing Q again works normally on it.
+27. Mash Q rapidly. Confirm the animation is not restarted underneath a raised
+    guard, and that you end up in a sane state (either guarding or not) rather
+    than stuck.
+28. Hold Q, and while guarding, reset (Esc → Reset Character). Confirm the new
+    character is at speed 16 and unprotected.
+29. Have another player punch you from the front at the exact moment you release
+    Q. Confirm nothing is left stuck — you are hittable a moment later either
+    way.
+30. Have two players both hold Q at once, and punch each from the front and the
+    back. Confirm each is protected independently — one player's guard must not
+    protect the other.
+31. Leave the server while guarding, rejoin, and confirm you spawn unprotected
+    at speed 16.
+
+**Movement interaction**
+
+32. Hold Shift to sprint (24), then press Q while still sprinting. Confirm the
+    speed drops to 8.
+33. Release Q while still holding Shift. Confirm the speed goes straight back
+    to **24**, not 16 — a parry must not strand a sprinting player at walking
+    speed.
+34. Hold Q, then press and release Shift underneath it. Confirm the speed stays
+    at 8 throughout.
+35. After several parry/sprint combinations, release everything and confirm the
+    speed settles at exactly 16 with no modifier left behind.
+
+36. Check Output for errors or warnings throughout. In particular, a
+    `sent a malformed parry transition` warning during honest play means
+    something is wrong with the controller, not with the player.

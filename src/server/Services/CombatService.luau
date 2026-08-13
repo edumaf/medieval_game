@@ -18,6 +18,12 @@
 	Damage goes through HealthService rather than touching Humanoid.Health, so
 	the existing clamping, death and respawn rules apply unchanged.
 
+	Parrying adds two gates and changes nothing else: an attacker who is in a
+	parry cannot swing, and a selected target holding a guard that covers the
+	direction the punch came from takes no damage. Both answers come from
+	ParryService, which holds the authoritative phase. When nobody is parrying
+	both gates are false and everything below runs exactly as it did before.
+
 	Follows the HealthService pattern: state in a module-local table keyed by
 	Player, Init() registers the remote handler before any client can reach
 	it, and per-player state is released on PlayerRemoving.
@@ -33,6 +39,7 @@ local Net = require(Shared.Net)
 local PunchRules = require(Shared.Combat.PunchRules)
 
 local HealthService = require(script.Parent.HealthService)
+local ParryService = require(script.Parent.ParryService)
 
 local log = Logger.forScope("CombatService")
 
@@ -81,14 +88,26 @@ local function onPunchRequest(attacker: Player)
 		return
 	end
 
+	-- No punching out of a guard, whether the parry is still winding up or is
+	-- already held: both hands are busy either way. PunchController refuses to
+	-- play the swing too, but that gate is presentation — this is the one that
+	-- decides, and it is here rather than in ParryService so the punch keeps a
+	-- single authoritative path.
+	if ParryService.isEngaged(attacker) then
+		return
+	end
+
 	local origin = attackerRoot.Position
 	local lookVector = attackerRoot.CFrame.LookVector
 
-	-- Two parallel arrays: PunchRules works in plain numbers so it can be
+	-- Three parallel arrays: PunchRules works in plain numbers so it can be
 	-- unit tested, so the Player instances stay here and are matched back up
-	-- by index.
+	-- by index. The root parts are kept alongside them so the parry check below
+	-- can read the winner's facing without a second character lookup that could
+	-- return nil for a character that went away mid-loop.
 	local candidates: { PunchRules.Candidate } = {}
 	local targets: { Player } = {}
+	local targetRoots: { BasePart } = {}
 
 	for _, target in Players:GetPlayers() do
 		if target == attacker or not isAlive(target) then
@@ -108,6 +127,7 @@ local function onPunchRequest(attacker: Player)
 		local direction = if distance > 0 then offset.Unit else lookVector
 
 		table.insert(targets, target)
+		table.insert(targetRoots, targetRoot)
 		table.insert(candidates, {
 			-- Judged against where the attacker saw this target rather than
 			-- where it is now, so a target sprinting away is not missed purely
@@ -129,6 +149,17 @@ local function onPunchRequest(attacker: Player)
 	end
 
 	local target = targets[index]
+
+	-- The parry is the last gate before damage, deliberately after selection
+	-- rather than during it: a guarding player absorbs the punch aimed at them
+	-- instead of being skipped as a candidate, so a punch never passes through
+	-- somebody's guard to reach whoever is standing behind them. The attacker
+	-- has already paid the cooldown either way.
+	if ParryService.isProtectedFrom(target, targetRoots[index], origin) then
+		log.info(`{target.Name} parried {attacker.Name}`)
+		return
+	end
+
 	local remaining = HealthService.takeDamage(target, Config.PunchDamage)
 	log.info(`{attacker.Name} punched {target.Name} for {Config.PunchDamage} -> {remaining}`)
 end

@@ -458,3 +458,177 @@ justified by a single unarmed attack.
 `PunchMaxCompensationStuds` is the dial for how bad this looks, not
 `PunchRange`. Lowering it makes the victim's experience more believable and
 chase hits less reliable, in that order.
+
+## The parry's phases are client-reported and server-held
+
+Holding Q raises a guard that stops punches from the front. The client owns the
+key, the animation and the `Hold` marker; `ParryService` owns the phase, and
+`CombatService` asks it whether a punch is stopped. The three transitions
+(`begin`, `hold`, `end`) travel over `ParryStateRequest` and are the only thing
+the client contributes.
+
+The obvious objection is that this trusts a client to say when it is protected.
+It is worth being precise about what that trust actually buys, because it is
+much less than it first appears. A modified client can send `begin` and `hold`
+back to back and reach the guard without playing the wind-up. It cannot widen
+the arc, because `ParryService` recomputes the direction from both root parts.
+It cannot guard while dead or after respawning, because `CharacterRemoving`
+clears the record server-side. It cannot claim a guard it never asked for,
+because `hold` from idle is a no-op inside `ParryState`. And it cannot punch
+while it claims to be guarding, because `CombatService` refuses that too. The
+entire exploit is *skipping the wind-up*, and the wind-up is a fraction of a
+second.
+
+Closing even that would need a server-side timing floor: refuse to treat a
+guard as raised until the animation's own time-to-`Hold` has elapsed. It was
+considered and deliberately left out. The floor needs a number that only the
+animation knows, which puts us back in exactly the position
+`PunchHitMarkerName` exists to avoid — a hand-measured constant that silently
+rots the next time the animation is re-exported, except this one rots in the
+direction of "the guard mysteriously does not work for the first few frames."
+Revisit it if parry-skipping ever turns out to be worth doing; the hook is a
+single comparison in `ParryService.isProtectedFrom`, not a redesign.
+
+### Why a remote at all
+
+There is no existing channel. `PunchRequest` carries no arguments by design and
+must not gain any. Health reaches the client by being mirrored onto
+`Humanoid.Health`, which replicates on its own — there is no equivalent
+property for "guarding" that the server could simply read.
+
+The one genuine alternative was to skip the remote and have the server inspect
+the character's `Animator` directly, since animations played on a
+client-network-owned character do replicate. It was rejected because it is not
+actually more authoritative: the `Hold` marker does not fire reliably on the
+server for a client-driven track, server-side `TimePosition` is approximate,
+and a modified client can play the same track at speed 0 or from an arbitrary
+position. It would have bought the same amount of trust while being much harder
+to read.
+
+### The two races, and why neither is compensated
+
+The guard begins at a marker on the client and is enforced on the server, so
+the two disagree for about one trip time in both directions. Reaching `Hold`
+before the server has processed it means a punch in that window lands despite
+the player seeing themselves guarded — that favours the attacker. Releasing Q
+before the server has processed *that* means a punch in that window is stopped
+despite the player having let go — that favours the defender. They are
+opposite-signed and bounded by the same window, so they broadly cancel out.
+
+Neither is compensated. A client-supplied timestamp would just be one more
+thing to lie about, and re-affirming the state on a timer would mean sending a
+remote on a schedule, which this repository does not do. This is the same shape
+of trade as the punch reach above: the server's clock is the truth, and the
+discrepancy gets written down rather than papered over.
+
+Stale state is a different problem from lag, and it *is* closed. Every way a
+parry ends other than the key coming up is observed server-side rather than
+reported: `CharacterRemoving` clears the record on death and respawn, and
+`PlayerRemoving` clears the tables. A client that never sends `end` loses its
+guard the moment it dies or leaves. A lease that expired a guard after some
+number of seconds was considered and rejected — `RemoteEvent` delivery is
+ordered and reliable, so it would cap legitimate long holds to defend against a
+failure that does not really happen.
+
+## The guard is the forward hemisphere, in the punch's own units
+
+`Config.ParryMinFacingDot` is `0`, compared with `>=`, against the dot product
+of the defender's look vector with the direction the attacker is in. That is
+the same quantity `PunchRules` calls `facingDot`, with the two roles swapped:
+the punch asks "is the target in front of the attacker", the parry asks "is the
+attacker in front of the defender."
+
+Reusing the convention rather than inventing an angle threshold matters more
+than it sounds. Two directional tests in one damage path that disagreed about
+what "in front" means would be a bug nobody could see by reading either one of
+them. As it stands both are computed in the same function call from the same
+live positions, and both are dot products against a tunable in `Config`. The
+punch's `0.5` is a 120-degree cone; the parry's `0` is the whole front half.
+
+The parry direction is deliberately **not** lag-compensated.
+`PunchRules.perceivedDistance` corrects distance only, and the punch's own cone
+is judged from live positions for the same reason — a guard that widened itself
+according to how fast somebody was running would be a different feature.
+
+The boundary is inclusive, so an attack from exactly 90 degrees is stopped.
+That matches `PunchRules.isInReach`, which is also `>=`. Nothing hinges on it —
+a punch landing on precisely the boundary is not a case that occurs in practice
+— but the two comparisons agreeing means neither has to be looked up.
+
+## `RunningController` stays the only writer of `WalkSpeed`
+
+Parrying slows the player to `Config.ParryWalkSpeed` (8, against 16 walking and
+24 sprinting), and parry outranks sprint, so holding Shift and Q gives 8.
+
+The slowdown is applied by `RunningController`, not by `ParryController`.
+`ParryController` reports its phase through `RunningController.setParryActive`
+and never touches the Humanoid. This is the whole reason `SprintState` grew a
+`parryRequested` field instead of the parry keeping its own modifier: two
+controllers assigning `WalkSpeed` would fight, and the failure would be
+intermittent and awful to reproduce — releasing Shift would clear a parry's
+slowdown, ending a parry would clear a sprint, and the order the two keys came
+up in would decide who won.
+
+With one state holding both intents, the speed is recomputed from scratch on
+every change rather than saved and restored, so there is no modifier that can be
+left behind. A parry that ends while Shift is still down goes straight back to
+24; a sprint released mid-parry leaves the parry at 8 and only drops to 16 when
+the guard does. Those transitions are covered in
+`tests/client/RunningController/SprintState.spec.luau`.
+
+`SprintState` keeps its filename despite now describing movement intent
+generally. Renaming it to `MovementState` would have churned the controller, its
+spec and three documents for no behavioural gain, inside a feature branch that
+is supposed to be reviewable.
+
+Note that this leaves the slowdown client-authoritative, exactly as sprinting
+already is: a modified client can guard at full speed. That is the same gap the
+sprinting section above describes, and parry is arguably the system that section
+predicted would close it. It does not close it, on purpose — making `WalkSpeed`
+server-authoritative is a larger change than the parry itself, and doing it here
+would have buried the feature inside a movement refactor.
+
+## The wind-up costs something, so cancelling is not free
+
+`ParryState` keeps three phases — idle, attempting, active — rather than one
+boolean, because "asked to guard" and "actually guarding" have to differ.
+Protection begins at the `Hold` marker and nowhere else: a player who releases Q
+during the wind-up was never protected, and no ordering of transitions can
+produce a guard except `begin` followed by `hold`.
+
+The slowdown and the punch lockout, though, begin at the key press. That is
+deliberate and it is what stops the wind-up being a free action. If cancelling
+before `Hold` cost nothing, tapping Q would be pure profit — a way to flicker
+in and out of the state at no risk. Paying the speed and the swing from the
+moment the key goes down means a cancelled parry is a real, if small, mistake.
+
+Blocking the punch is enforced twice, and the two are not redundant.
+`PunchController` refuses to *play* a swing while engaged, because a swing that
+visibly happens and deals no damage reads as a bug — the same reasoning as the
+client-side cooldown gate. `CombatService` refuses the request, because that is
+the one that counts.
+
+## The `Hold` pose is held by freezing the track
+
+At the marker, `ParryController` calls `track:AdjustSpeed(0)`. Roblox keeps
+applying a playing track's current pose at speed 0, so the character stays in
+the guard with no loop, no re-play and no per-frame work. Releasing Q restores
+the speed and then stops the track with a short fade.
+
+Looping the animation was the alternative and is wrong: a loop would replay the
+wind-up under a guard that is already up, and would fire the marker again on
+every cycle. Re-playing it on a timer has the same problem plus a timer. Neither
+buys anything over a paused track.
+
+The animation is started exactly once per parry, which is why the marker fires
+exactly once and why `Play()` is preceded by `Stop(0)` — `Play()` on a track
+that is already playing does nothing, and swallowing the marker would cost the
+player the entire guard rather than just a frame of animation.
+
+The same failure mode as the punch applies, and it is worth stating because it
+is silent: if `Config.ParryHoldMarkerName` is missing from the published
+animation, or is spelled differently, the parry winds up forever. The player is
+slowed and cannot punch, and never becomes protected, with nothing in Output to
+say why. That is why the marker name sits in `Config` next to the asset id, and
+why `Config.spec.luau` asserts both are well-formed. Neither check can prove the
+marker exists inside the published asset — only Studio can.

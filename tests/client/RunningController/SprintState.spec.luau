@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Covers the pure sprint-intent state RunningController wires up to actual
+	Covers the pure movement-intent state RunningController wires up to actual
 	input and a Humanoid. No Roblox character or input device involved here —
 	see docs/decisions.md for the Studio steps that cover those.
 ]]
@@ -18,20 +18,31 @@ local it = JestGlobals.it
 
 local NORMAL_SPEED = 16
 local SPRINT_SPEED = 24
+local PARRY_SPEED = 8
+
+--[[
+	The speed RunningController would apply for this state, with the shipped
+	numbers. Wraps the speed arguments so they do not have to be repeated in
+	every assertion.
+]]
+local function speedOf(state: { sprintRequested: boolean, parryRequested: boolean }): number
+	return SprintState.walkSpeed(state, NORMAL_SPEED, SPRINT_SPEED, PARRY_SPEED)
+end
 
 describe("RunningController.SprintState", function()
-	it("starts out not sprinting", function()
+	it("starts out neither sprinting nor parrying", function()
 		local state = SprintState.initial()
 
 		expect(state.sprintRequested).toBe(false)
-		expect(SprintState.walkSpeed(state, NORMAL_SPEED, SPRINT_SPEED)).toBe(NORMAL_SPEED)
+		expect(state.parryRequested).toBe(false)
+		expect(speedOf(state)).toBe(NORMAL_SPEED)
 	end)
 
 	it("requests sprint when Shift begins", function()
 		local state = SprintState.withInputBegan(SprintState.initial())
 
 		expect(state.sprintRequested).toBe(true)
-		expect(SprintState.walkSpeed(state, NORMAL_SPEED, SPRINT_SPEED)).toBe(SPRINT_SPEED)
+		expect(speedOf(state)).toBe(SPRINT_SPEED)
 	end)
 
 	it("clears the sprint request when Shift ends", function()
@@ -39,7 +50,7 @@ describe("RunningController.SprintState", function()
 		local state = SprintState.withInputEnded(sprinting)
 
 		expect(state.sprintRequested).toBe(false)
-		expect(SprintState.walkSpeed(state, NORMAL_SPEED, SPRINT_SPEED)).toBe(NORMAL_SPEED)
+		expect(speedOf(state)).toBe(NORMAL_SPEED)
 	end)
 
 	it("is idempotent for repeated begin events", function()
@@ -69,5 +80,103 @@ describe("RunningController.SprintState", function()
 
 		state = SprintState.withInputBegan(state)
 		expect(state.sprintRequested).toBe(true)
+	end)
+end)
+
+describe("RunningController.SprintState, parrying", function()
+	it("slows the player while parrying", function()
+		local state = SprintState.withParryBegan(SprintState.initial())
+
+		expect(state.parryRequested).toBe(true)
+		expect(speedOf(state)).toBe(PARRY_SPEED)
+	end)
+
+	it("restores normal speed when the parry ends", function()
+		local parrying = SprintState.withParryBegan(SprintState.initial())
+		local state = SprintState.withParryEnded(parrying)
+
+		expect(state.parryRequested).toBe(false)
+		expect(speedOf(state)).toBe(NORMAL_SPEED)
+	end)
+
+	it("is idempotent for repeated parry begins", function()
+		local once = SprintState.withParryBegan(SprintState.initial())
+		local twice = SprintState.withParryBegan(once)
+
+		expect(twice).toEqual(once)
+	end)
+
+	it("is idempotent for repeated parry ends", function()
+		local once = SprintState.withParryEnded(SprintState.initial())
+		local twice = SprintState.withParryEnded(once)
+
+		expect(twice).toEqual(once)
+	end)
+end)
+
+describe("RunningController.SprintState, parry against sprint", function()
+	it("lets the parry win while both keys are held", function()
+		-- Shift + Q walks at the parry speed. A guard you can sprint out of is
+		-- not a guard.
+		local state = SprintState.withParryBegan(SprintState.withInputBegan(SprintState.initial()))
+
+		expect(state.sprintRequested).toBe(true)
+		expect(state.parryRequested).toBe(true)
+		expect(speedOf(state)).toBe(PARRY_SPEED)
+	end)
+
+	it("wins whichever key was pressed first", function()
+		local parryFirst =
+			SprintState.withInputBegan(SprintState.withParryBegan(SprintState.initial()))
+
+		expect(speedOf(parryFirst)).toBe(PARRY_SPEED)
+	end)
+
+	it("resumes sprinting the moment the parry ends with Shift still held", function()
+		-- The reason both intents live in one state: ending a parry must not
+		-- strand a player who never released Shift at the walking speed.
+		local guarding =
+			SprintState.withParryBegan(SprintState.withInputBegan(SprintState.initial()))
+		local state = SprintState.withParryEnded(guarding)
+
+		expect(state.sprintRequested).toBe(true)
+		expect(speedOf(state)).toBe(SPRINT_SPEED)
+	end)
+
+	it("walks normally when the parry ends and Shift was released during it", function()
+		local state = SprintState.initial()
+
+		state = SprintState.withInputBegan(state)
+		state = SprintState.withParryBegan(state)
+		state = SprintState.withInputEnded(state)
+		expect(speedOf(state)).toBe(PARRY_SPEED)
+
+		state = SprintState.withParryEnded(state)
+		expect(speedOf(state)).toBe(NORMAL_SPEED)
+	end)
+
+	it("keeps the parry when Shift is pressed and released underneath it", function()
+		local state = SprintState.withParryBegan(SprintState.initial())
+
+		state = SprintState.withInputBegan(state)
+		expect(speedOf(state)).toBe(PARRY_SPEED)
+
+		state = SprintState.withInputEnded(state)
+		expect(state.parryRequested).toBe(true)
+		expect(speedOf(state)).toBe(PARRY_SPEED)
+	end)
+
+	it("leaves no modifier behind after a full parry-while-sprinting cycle", function()
+		-- The stale-modifier failure this design exists to make impossible: the
+		-- speed is recomputed from both intents, never saved and restored.
+		local state = SprintState.initial()
+
+		state = SprintState.withInputBegan(state)
+		state = SprintState.withParryBegan(state)
+		state = SprintState.withParryEnded(state)
+		state = SprintState.withInputEnded(state)
+
+		expect(state).toEqual(SprintState.initial())
+		expect(speedOf(state)).toBe(NORMAL_SPEED)
 	end)
 end)
