@@ -199,3 +199,57 @@ by `tests/client/RunningController/SprintState.spec.luau` — they need no
 Humanoid or input device, so they are pure Jest unit tests rather than a
 Studio play-test. The actual key handling and `Humanoid.WalkSpeed` effect can
 only be verified by hand in Studio.
+
+## Health (`HealthService`) keeps its own state and mirrors it onto Humanoid
+
+Unlike sprinting, health is server-authoritative from the first version, and
+that ruled out the option that looked simplest: reading and writing
+`Humanoid.Health`/`MaxHealth` directly and treating them as the source of
+truth. Health is not one of Roblox's specially-replicated Humanoid movement
+properties (`WalkSpeed`, jump state, and so on) that only ever flow
+server→client because a player's own character is client-network-owned —
+`Humanoid.Health`, specifically, replicates in the other direction too: a
+client's own change to their own Humanoid's `Health` reaches the server. This
+is a known, documented Roblox behavior (it is how, for example, client-side
+fall damage or a modified client's self-heal/self-damage reaches the server),
+not an oversight in this codebase. Treating `Humanoid.Health` as authoritative
+would mean `HealthService.getHealth`/`isDead` could be lying the moment a
+player runs modified client code — the opposite of what "Unlike the Running
+System, Health must be server-authoritative" requires.
+
+`HealthService` therefore keeps the real number in a module-local table
+(`records[player].state`, a `HealthState.HealthState` — current, max, dead),
+exactly like `SessionService.sessions`. Every read (`getHealth`, `getMaxHealth`,
+`isDead`) and write (`takeDamage`, `heal`) goes through that table, never
+through the Humanoid. `Humanoid.Health`/`MaxHealth` are mirrored one-way, from
+this state onto the Humanoid, purely so Roblox's own death/ragdoll handling
+(and any future health bar) have something to read.
+
+That mirror has to defend itself, or it becomes a second source of truth by a
+different route: Roblox inserts a default passive-regen script into every
+character (1% of `MaxHealth`/second) unless something overrides it, and that
+would drift `Humanoid.Health` away from `records[player].state.current` on its
+own, in addition to the client-replication case above. Rather than adding an
+empty `Health` script under `StarterCharacterScripts` — which would mean
+touching the Rojo mappings, explicitly out of scope for this feature —
+`HealthService` connects to the character's `Humanoid.HealthChanged` and
+snaps `Humanoid.Health` back to `records[player].state.current` whenever the
+two disagree. Once they match, re-applying the same value is a no-op, so this
+cannot loop. This is ordinary server-authority reassertion (the same idea as
+`Net`'s "the server validates, the client does not get to assert state"), not
+an anti-cheat system: there is no detection, logging-for-punishment, or rate
+limiting here, just "this service owns this number."
+
+One gap this does **not** close: a modified client can still change what its
+*own screen* shows for its own Humanoid's `Health` between the moment it
+diverges and the next `HealthChanged` correction, and Roblox's real `Died`
+event fires off the live `Humanoid.Health` value, not off
+`records[player].state`. A client could theoretically force their own
+Humanoid's health to 0 to trigger a cosmetic death/ragdoll `HealthService`
+does not know about, or hold it above 0 to delay the visual effect of a lethal
+`takeDamage` call by a frame. Nothing today depends on that timing — there is
+no combat, no rewards, no kill credit — so closing it completely would mean
+building exactly the anti-cheat system this feature is explicitly not meant
+to add. Revisit this when Combat lands: at that point `Humanoid.Died` becoming
+meaningful for game logic (not just visuals) is the signal that this mirror
+needs to become an actively-defended one.

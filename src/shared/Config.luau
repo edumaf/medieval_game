@@ -31,6 +31,12 @@ local Config = {
 	]]
 	NormalWalkSpeed = 16,
 	SprintWalkSpeed = 24,
+
+	--[[
+		Health (and max health) every character starts at and is restored to on
+		respawn. See src/server/Services/HealthService.
+	]]
+	NormalHealth = 100,
 }
 
 return table.freeze(Config)
