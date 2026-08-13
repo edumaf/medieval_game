@@ -56,8 +56,11 @@ local Config = {
 
 	-- Maximum studs between the two HumanoidRootParts for a punch to land.
 	-- Two characters standing shoulder to shoulder are roughly 4 studs apart,
-	-- so this is a little over arm's reach and forgiving of latency.
-	PunchRange = 7,
+	-- so this is just past touching distance — enough slack for latency
+	-- without reaching someone who is visibly out of arm's length. Was 7;
+	-- playtesting found that let punches land well before the swing looked
+	-- like it should connect.
+	PunchRange = 5,
 
 	-- Minimum seconds between one player's punches.
 	PunchCooldownSeconds = 0.6,
