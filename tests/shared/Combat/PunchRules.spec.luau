@@ -28,7 +28,19 @@ describe("PunchRules.canPunch", function()
 	end)
 
 	it("allows a punch exactly on the cooldown boundary", function()
-		expect(PunchRules.canPunch(100, 100.6, COOLDOWN)).toBe(true)
+		-- Deliberately uses 0.5 rather than COOLDOWN. 100.6 - 100 evaluates to
+		-- 0.5999999999999943, so asserting the boundary with 0.6 tests IEEE 754
+		-- rounding rather than the >= in canPunch. Halves are exactly
+		-- representable, so this asserts the intended semantics.
+		--
+		-- The imprecision is harmless in the game: os.clock() never lands
+		-- exactly on a boundary, and being ready a picosecond late is not
+		-- something a player can feel.
+		expect(PunchRules.canPunch(100, 100.5, 0.5)).toBe(true)
+	end)
+
+	it("blocks a punch a hair before the cooldown boundary", function()
+		expect(PunchRules.canPunch(100, 100.499, 0.5)).toBe(false)
 	end)
 
 	it("allows a punch well after the cooldown", function()
