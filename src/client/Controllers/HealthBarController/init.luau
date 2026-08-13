@@ -13,7 +13,8 @@
 
 	Layout is Studio-owned (see docs/ui-workflow.md). This file creates
 	nothing, styles nothing and positions nothing. It drives exactly three
-	properties -- HealthBar.Enabled, Fill.Size and Amount.Text -- and depends
+	properties -- HealthBar.Enabled, Fill.Size and Amount.Text -- turns off
+	Roblox's built-in health display so the two do not overlap, and depends
 	on this hierarchy, which is a contract with the designer:
 
 		HealthBar (ScreenGui)   ResetOnSpawn = false, ships Enabled = false
@@ -29,6 +30,7 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local StarterGui = game:GetService("StarterGui")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Logger = require(Shared.Util.Logger)
@@ -181,10 +183,35 @@ local function onCharacterAdded(character: Model)
 	end
 end
 
+--[[
+	Hides Roblox's built-in health display, which would otherwise sit on
+	screen next to ours showing the same number twice.
+
+	pcall'd rather than called bare: SetCoreGuiEnabled throws if the CoreGui
+	has not finished loading yet, and Start() runs in its own thread, so an
+	unguarded error here would abort the rest of it and leave the bar never
+	bound to a Humanoid. One attempt and no retry loop -- a visible default
+	bar is a cosmetic problem, not worth polling for.
+]]
+local function hideDefaultHealthBar()
+	local ok, err = pcall(function()
+		StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Health, false)
+	end)
+
+	if not ok then
+		log.warn(`could not hide Roblox's default health display: {tostring(err)}`)
+	end
+end
+
 function HealthBarController.Start()
 	if not findUi() then
 		return
 	end
+
+	-- Deliberately after findUi(): if our replacement is missing, leaving
+	-- Roblox's own bar up beats leaving the player with no health display
+	-- at all.
+	hideDefaultHealthBar()
 
 	player.CharacterAdded:Connect(onCharacterAdded)
 	player.CharacterRemoving:Connect(function()
