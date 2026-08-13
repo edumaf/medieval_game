@@ -116,16 +116,70 @@ reconnect Rojo. The button also refuses to run while you are in Play mode — it
 tests the Edit-mode project, not the live session, so running both together
 would be misleading rather than useful.
 
+## Which test mode to use
+
+Studio offers several ways to run the game, and they do **not** behave the
+same. This matters because the `/damage` and `/heal` commands are gated on the
+server.
+
+| Mode | Where the server runs | `IsStudio()` on the server | Test commands |
+| --- | --- | --- | --- |
+| **Play** / **Play Here** (solo) | Locally, in Studio | `true` | Work, no setup |
+| **Test → Clients and Servers** | Locally, in Studio | `true` | Work, no setup |
+| **Team Test** | On a real Roblox server | **`false`** | Need your UserId in the allow-list |
+| Published game | On a real Roblox server | `false` | Need your UserId in the allow-list |
+
+**For testing multiplayer on one machine, use Test → Clients and Servers.** It
+spins up a local server plus however many client windows you ask for, runs
+entirely in Studio, and needs no configuration.
+
+**Team Test** is for editing and testing together from different machines
+(it requires Team Create). Because it runs on a real Roblox server,
+`RunService:IsStudio()` is `false` there on the server — although confusingly
+it is still `true` on the clients. Roblox provides no reliable way to detect a
+Team Test server, so we authorise people instead of environments.
+
+### Enabling the commands for yourself
+
+Add your Roblox UserId to `DEVELOPER_USER_IDS` in
+`src/server/DeveloperAccess.luau`:
+
+```lua
+local DEVELOPER_USER_IDS: { [number]: true } = {
+	[123456789] = true, -- yourname
+}
+```
+
+Your UserId is in your profile URL: `roblox.com/users/<UserId>/profile`. You
+can also print it in Studio with `print(game.Players.LocalPlayer.UserId)`.
+
+This is a normal code change — commit it in a PR like anything else. Listed
+developers keep the commands on the published game too; that is deliberate, and
+the reasoning (plus how to tighten it) is in `DeveloperAccess.luau`.
+
+## Manual verification: test command access
+
+1. **Play** solo, type `/damage 20`. Confirm health drops — this must work
+   with an empty allow-list.
+2. **Test → Clients and Servers** with 2 players, `/damage 20` on each.
+   Confirm both work, and that damaging one does not change the other's health.
+3. **Team Test** with your UserId *not* in the list. Confirm `/damage 20` does
+   nothing at all — no health change, no error in Output.
+4. Add your UserId, sync, restart the Team Test session, and confirm the
+   command now works for you and still does nothing for an unlisted teammate.
+
 ## Manual verification: Health system
 
 `HealthService`'s numeric rules are covered by
 `tests/server/HealthService/HealthState.spec.luau`, but the Humanoid
-integration — spawning, damage/heal through the Studio-only chat commands,
-death, and respawn — can only be checked by hand in Studio (see
-`docs/decisions.md` for why `HealthService` keeps its own state instead of
-trusting `Humanoid.Health` directly). There is no Combat system yet, so the
-manual mechanism is `/damage <amount>` and `/heal <amount>` typed in chat;
-both are no-ops outside Studio (`RunService:IsStudio()`).
+integration — spawning, damage/heal through the chat commands, death, and
+respawn — can only be checked by hand in Studio (see `docs/decisions.md` for
+why `HealthService` keeps its own state instead of trusting `Humanoid.Health`
+directly). There is no Combat system yet, so the manual mechanism is
+`/damage <amount>` and `/heal <amount>` typed in chat.
+
+Who may use those commands is decided by `src/server/DeveloperAccess.luau` —
+see "Which test mode to use" below before you try them with other people.
 
 1. Start `rojo serve`, connect Studio, press **Play**.
 2. Confirm the server and client each log `boot complete` exactly once.
