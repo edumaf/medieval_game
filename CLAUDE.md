@@ -9,20 +9,43 @@ developers, one UI designer, one builder. Written in Luau, synced into Roblox
 Studio with Rojo. The filesystem is the source of truth for code; the Roblox
 place file is the source of truth for the map and UI layout.
 
-**No gameplay systems exist yet.** The repository currently contains the
-architecture, tooling and a minimal boot path that proves it works.
+**Gameplay has started.** Health, punch combat and sprinting exist and work.
+Everything else — stamina, blocking, weapons, inventory, quests, NPCs,
+progression, currency, data persistence, the map — does not. Do not describe
+this project as having no gameplay, and do not rebuild what is listed below.
+
+## What is built
+
+| System | Server | Client | Pure logic (tested) |
+| --- | --- | --- | --- |
+| Health, death, respawn | `HealthService/` | `HealthBarController/` | `HealthState`, `HealthDisplay` |
+| Punch combat (left click) | `CombatService` | `PunchController` | `Shared/Combat/PunchRules` |
+| Sprint (hold Shift) | — client-only | `RunningController/` | `SprintState` |
+| Boot handshake | `SessionService` | `SessionController` | — |
+
+Combat specifics that are easy to break:
+
+- `PunchRequest` carries **no arguments**. The client reports the swing; the
+  server decides target, range, facing and damage. Do not add arguments to it.
+- Punch timing comes from the animation's `Hit` marker
+  (`Config.PunchHitMarkerName`), not a timer. See `docs/decisions.md`.
+- `PunchRules.perceivedDistance` compensates for a fleeing target's replicated
+  position lagging behind. It is capped so it cannot become a ranged attack.
+- Every tunable number lives in `Shared/Config.luau`.
 
 ## Source tree
 
 ```
 src/shared/     ReplicatedStorage.Shared   types, config, utilities, remote declarations
   Types.luau            types crossing the client/server boundary
-  Config.luau           frozen tunables — nothing secret, clients can read it
+  Config.luau           every tunable number in the game, frozen
+  Combat/PunchRules     pure punch arithmetic — reach, cone, cooldown, lag
   Net/                  remote registry; Remotes.luau declares every remote
   Runtime/Bootstrap     Init()/Start() lifecycle runner
   Util/Logger           scoped logging — use this, not bare print
 src/server/     ServerScriptService.Server        authoritative gameplay
   init.server.luau      entry point; Net.build() then Bootstrap.run
+  DeveloperAccess       gates the /damage and /heal test commands
   Services/             one file per system
 src/client/     StarterPlayerScripts.Client       presentation and input
   init.client.luau      entry point

@@ -65,9 +65,16 @@ local Config = {
 	-- extended punch reaches about touching-distance (~1) + arm length (~2)
 	-- + the target's own near-side offset (~0.5) from their root part.
 	--
-	-- 3 is that geometric estimate (~3.5) tightened slightly further after
-	-- playtesting a real swing in Team Test. Revisit with the same reasoning
-	-- above if it starts missing hits that visibly connect.
+	-- That estimate came out around 3.5, and 3 was tried in Team Test. Both
+	-- were tightened too far once two players were actually moving: at 3 a
+	-- punch that visibly connected during a chase would miss. 4.5 is where
+	-- playtesting landed, and it is deliberately above the static geometry —
+	-- the lag allowance below only returns part of a moving target's error,
+	-- so the reach has to carry the rest.
+	--
+	-- Retune this and PunchMaxCompensationStuds together. Raising one to fix
+	-- chases while leaving the other is what produces a punch that lands from
+	-- further than an arm looks.
 	PunchRange = 4.5,
 
 	-- Minimum seconds between one player's punches.

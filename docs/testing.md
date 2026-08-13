@@ -329,8 +329,10 @@ Team Test if you are on separate machines.
 5. Face away from B and click. Confirm nothing happens — no damage, no log
    line. The cone is 120 degrees, so "slightly off to the side" should still
    connect; directly behind must not.
-6. Walk well away from B (more than about 3 studs) and click. Confirm
-   nothing happens.
+6. Walk well away from B (more than about 4.5 studs, and with B standing
+   still) and click. Confirm nothing happens. B must be stationary for this
+   step — a receding target is given a lag allowance on top of the reach, so
+   the effective distance is larger while they run.
 7. Click with nobody else in the server. Confirm no errors in Output.
 8. Punch B while B is dead. Confirm nothing happens.
 
