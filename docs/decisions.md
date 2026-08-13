@@ -415,3 +415,46 @@ this repository. It is not justified by a punch with a seven-stud reach.
 There is still no line-of-sight check, exactly as before: reach and cone are the
 whole test, and this change does not let a punch travel through anything it
 could not travel through yesterday.
+
+### Known limitation: the victim sees a ranged punch
+
+Play-tested across two machines, and the trade above is visible in exactly the
+way the theory predicts. Chase punches now register — that part works. But the
+two players no longer agree on what happened: on the attacker's screen the two
+characters are touching, while on the victim's screen the attacker is still
+some way behind them and the hit reads as a punch thrown from thin air.
+
+This is not a tuning failure or an unfinished fix. It is the cost of favouring
+the attacker's view, and it cannot be tuned away, because the two clients
+genuinely disagree about where everybody was. The only choices are:
+
+- **Favour the attacker** (what we do). Hits land when they look like they
+  should to the person swinging. The victim is sometimes hit from a distance
+  that looks impossible on their own screen.
+- **Favour the victim.** Nobody is ever hit unfairly, and chase punches that
+  visibly connect silently fail — which is the bug that started all of this.
+
+There is no third option. Every networked fighting game picks one and pays for
+it somewhere.
+
+**Decision: leave it.** Punching a chased opponent working at all is worth more
+right now than the two views agreeing, and the discrepancy is bounded by
+`PunchMaxCompensationStuds` rather than open-ended. Revisiting it properly means
+position history and rewind, which is a real piece of engineering and not
+justified by a single unarmed attack.
+
+**Revisit when weapons land.** Two reasons, and the first is the dangerous one:
+
+1. The allowance is a **flat stud value** added on top of whatever the reach is.
+   A weapon with longer reach does not need a proportionally larger correction —
+   the replication error depends on the target's speed, not on how long your
+   sword is — so a fixed 2 studs will look progressively more wrong as reach
+   grows. It may want to become proportional, or to stay fixed while reach
+   grows around it. That is a deliberate decision to make, not something to
+   leave to whichever number was tuned for fists.
+2. More reach means a larger absolute gap between the two players' views, so
+   the complaint above gets louder before it gets quieter.
+
+`PunchMaxCompensationStuds` is the dial for how bad this looks, not
+`PunchRange`. Lowering it makes the victim's experience more believable and
+chase hits less reliable, in that order.
