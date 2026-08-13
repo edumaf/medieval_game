@@ -351,14 +351,31 @@ Team Test if you are on separate machines.
 12. Die, respawn, and punch again. Confirm it still works — a punch that stops
     working after your first death means the animation or character
     references were not re-bound.
+13. Die and respawn several times, then punch **once**. Confirm B loses
+    exactly 25, not a multiple of it. Damage that scales with how many times
+    you have died means `CharacterAdded` is stacking marker connections
+    instead of replacing them.
+14. Punch, and while the swing is still playing, reset (Esc → Reset
+    Character). Confirm the dead character's swing does not damage anyone
+    after the new one spawns.
 
 **Animation**
 
-Skip this until `Config.PunchAnimationId` is set — an empty value is the
-supported "no animation uploaded yet" state, and the punch works without one.
-Once set:
+`Config.PunchAnimationId` is `rbxassetid://86842108763107` (Punch_Right), and
+its `Hit` marker is what fires `PunchRequest` — the click only starts the
+swing. Empty is still the supported "no animation" state, in which the hit is
+reported on the click instead; skip 16–18 if you have blanked the id.
 
-13. Confirm the swing plays for the attacker.
-14. Confirm the **other** player sees it too. Animations played on your own
+15. Confirm the swing plays for the attacker.
+16. Confirm the **other** player sees it too. Animations played on your own
     character replicate automatically; if only you can see it, the animation
     was loaded on the wrong Animator.
+17. Watch B's health bar against A's swing. Damage must land **mid-swing**, on
+    the frame the fist arrives — not on the click, and not when the animation
+    ends. This is the whole point of the marker; if damage lands instantly the
+    marker is not connected.
+18. Confirm one click deals damage exactly once. Two hits from one swing means
+    the marker is connected more than once.
+19. Confirm the punch reads over walking: run at B and punch while moving. The
+    swing must be visible, not overridden by the walk animation (that is what
+    `Action` priority is for).

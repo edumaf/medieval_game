@@ -21,7 +21,8 @@ local Definitions: { [string]: RemoteClass } = {
 	-- Client asks the server which build it is running, right after it boots.
 	Handshake = "RemoteFunction",
 
-	-- Client reports that the player threw a punch. Deliberately carries no
+	-- Client reports that the player's punch connected, on the frame the
+	-- punch animation's "Hit" marker fires. Deliberately carries no
 	-- arguments: the server decides who was hit, and for how much, from its
 	-- own view of the world. There is nothing here for a modified client to
 	-- forge except the timing, which CombatService rate-limits.

@@ -67,10 +67,17 @@ local Config = {
 	-- never behind you.
 	PunchMinFacingDot = 0.5,
 
-	-- rbxassetid:// of the punch animation. Empty string means "no animation
-	-- uploaded yet" — the punch still works, it just plays nothing. Set this
-	-- once the animation exists; nothing else needs to change.
-	PunchAnimationId = "",
+	-- rbxassetid:// of the punch animation (Punch_Right, R15). Empty string
+	-- means "no animation uploaded yet" — the punch still works, it just
+	-- plays nothing and reports the hit on the click instead.
+	PunchAnimationId = "rbxassetid://86842108763107",
+
+	-- Name of the animation event marker on that animation, placed on the
+	-- frame where the fist connects. PunchController fires PunchRequest when
+	-- the track reaches it, so this is the attack's timing — a re-export that
+	-- renames or drops the marker stops punches landing, and the two values
+	-- have to be changed together.
+	PunchHitMarkerName = "Hit",
 }
 
 return table.freeze(Config)

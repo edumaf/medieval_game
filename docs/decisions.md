@@ -303,3 +303,42 @@ appears alive and targetable to the server, and still takes damage normally.
 So the gap described above stays cosmetic and stays open. The signal to close
 it is kill credit, death rewards, or respawn timers keyed off `Humanoid.Died`
 — none of which exist yet.
+
+## The punch animation's `Hit` marker is the attack's timing
+
+`PunchController` fires `PunchRequest` from
+`track:GetMarkerReachedSignal(Config.PunchHitMarkerName)`, not from the click
+that started the swing. The marker sits on the frame of `Punch_Right`
+(`rbxassetid://86842108763107`) where the fist actually connects.
+
+The alternative is a delay: click, `task.wait(0.25)`, fire. It is one line
+shorter and it is wrong twice over. It hard-codes a number that belongs to the
+animation, so re-exporting the swing with different timing silently
+desynchronises damage from what the player sees, with nothing failing loudly
+enough to notice. And it is a number nobody can derive — whoever tuned the
+keyframes already knows exactly when the punch lands, and the marker is how
+they say so. Polling `track.TimePosition` on `Heartbeat` has the same problem
+plus a per-frame cost, for a signal the engine already raises.
+
+The cost is that a missing or renamed marker stops punches landing entirely,
+with no error. That is why the marker name is in `Config` next to the asset id
+rather than buried as a string literal, and why `Config.spec.luau` asserts
+both are well-formed. Neither check can prove the marker exists inside the
+published asset — only Studio can, which is step 17 in `docs/testing.md`.
+
+Nothing moved to the client. The marker decides *when* the request is sent;
+`CombatService` still decides who was in range, whether they were alive, and
+how much damage they take. A modified client that fires `PunchRequest` on a
+loop still gets rate-limited by the same cooldown as everyone else, because
+the server never trusted the timing in the first place — it only trusts its
+own clock.
+
+### The cooldown did not need changing
+
+The request now arrives a fraction of a second later than the click, so
+`CombatService`'s cooldown window shifts by that fraction. It does not narrow:
+every punch is offset by the same marker delay, so the interval between two
+consecutive requests is still the interval between two clicks. The client
+keeps gating on the click rather than the marker, so a click made during the
+cooldown plays no swing at all — a swing that visibly happens but deals no
+damage would read as a bug.
