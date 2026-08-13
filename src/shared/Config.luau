@@ -55,12 +55,20 @@ local Config = {
 	PunchDamage = 25,
 
 	-- Maximum studs between the two HumanoidRootParts for a punch to land.
-	-- Two characters standing shoulder to shoulder are roughly 4 studs apart,
-	-- so this is just past touching distance — enough slack for latency
-	-- without reaching someone who is visibly out of arm's length. Was 7;
-	-- playtesting found that let punches land well before the swing looked
-	-- like it should connect.
-	PunchRange = 5,
+	--
+	-- Default R15 HumanoidRootPart is 2x2x1 studs, so two characters standing
+	-- front-to-front and touching are roughly 1 stud apart center to center
+	-- (0.5 + 0.5), not the ~4 this comment previously claimed -- that wrong
+	-- estimate is why 7, then 5, both let punches land across a gap visibly
+	-- wider than an arm's reach. An R15 arm is roughly 2 studs from shoulder
+	-- to fist, and the shoulder sits close to the torso surface, so a fully
+	-- extended punch reaches about touching-distance (~1) + arm length (~2)
+	-- + the target's own near-side offset (~0.5) from their root part.
+	-- 3.5 rounds that up slightly for latency and swing timing without
+	-- reaching someone who is clearly still out of arm's length. Confirm
+	-- against a real swing in Studio before tightening further -- this is a
+	-- geometric estimate, not a measurement.
+	PunchRange = 3.5,
 
 	-- Minimum seconds between one player's punches.
 	PunchCooldownSeconds = 0.6,

@@ -329,8 +329,8 @@ Team Test if you are on separate machines.
 5. Face away from B and click. Confirm nothing happens — no damage, no log
    line. The cone is 120 degrees, so "slightly off to the side" should still
    connect; directly behind must not.
-6. Walk well away from B (more than about 5 studs) and click. Confirm nothing
-   happens.
+6. Walk well away from B (more than about 3.5 studs) and click. Confirm
+   nothing happens.
 7. Click with nobody else in the server. Confirm no errors in Output.
 8. Punch B while B is dead. Confirm nothing happens.
 
