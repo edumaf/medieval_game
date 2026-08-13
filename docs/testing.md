@@ -25,7 +25,10 @@ tests/
   shared/
     Config.spec.luau
     Logger.spec.luau
+    Combat/
+      PunchRules.spec.luau
   server/
+    DeveloperAccess.spec.luau
     HealthService/
       HealthState.spec.luau
   client/
@@ -175,8 +178,9 @@ the reasoning (plus how to tighten it) is in `DeveloperAccess.luau`.
 integration — spawning, damage/heal through the chat commands, death, and
 respawn — can only be checked by hand in Studio (see `docs/decisions.md` for
 why `HealthService` keeps its own state instead of trusting `Humanoid.Health`
-directly). There is no Combat system yet, so the manual mechanism is
-`/damage <amount>` and `/heal <amount>` typed in chat.
+directly). The manual mechanism is `/damage <amount>` and `/heal <amount>`
+typed in chat, which lets you set up an exact health value without having to
+land a specific number of punches.
 
 Who may use those commands is decided by `src/server/DeveloperAccess.luau` —
 see "Which test mode to use" below before you try them with other people.
@@ -300,3 +304,61 @@ ROBLOX_OPEN_CLOUD_KEY=... ROBLOX_UNIVERSE_ID=... ROBLOX_TEST_PLACE_ID=... \
 ```
 
 Never put those values in a file inside the repository.
+
+## Manual verification: Punch
+
+`PunchRules` covers the arithmetic — cooldown, reach, cone, nearest-target
+selection — in `tests/shared/Combat/PunchRules.spec.luau`. What no unit test
+can cover is whether a punch actually connects between two real characters,
+so this needs two players.
+
+Use **Test → Clients and Servers** with 2 players (no allow-list needed), or
+Team Test if you are on separate machines.
+
+**Landing a hit**
+
+1. Stand player A directly in front of player B, close enough to touch.
+2. Left click on A. Confirm B's health bar drops by 25, and Output logs
+   `A punched B for 25 -> 75`.
+3. Punch three more times. Confirm B reaches exactly 0, dies once, and
+   respawns at 100.
+4. Confirm **A's** health never changes. You cannot punch yourself.
+
+**Not landing a hit**
+
+5. Face away from B and click. Confirm nothing happens — no damage, no log
+   line. The cone is 120 degrees, so "slightly off to the side" should still
+   connect; directly behind must not.
+6. Walk well away from B (more than about 7 studs) and click. Confirm nothing
+   happens.
+7. Click with nobody else in the server. Confirm no errors in Output.
+8. Punch B while B is dead. Confirm nothing happens.
+
+**Cooldown**
+
+9. Click as fast as you can. Confirm damage lands at most about twice a
+   second, not once per click, and that Output does not fill with warnings.
+
+**Crowd behaviour** (needs 3 players, or move a second character into place)
+
+10. With two targets in front of you at different distances, confirm the
+    **nearer** one takes the damage.
+11. With one player behind you and one in front, confirm the one **in front**
+    takes it — being closer must not let the player behind steal the hit.
+
+**Respawn**
+
+12. Die, respawn, and punch again. Confirm it still works — a punch that stops
+    working after your first death means the animation or character
+    references were not re-bound.
+
+**Animation**
+
+Skip this until `Config.PunchAnimationId` is set — an empty value is the
+supported "no animation uploaded yet" state, and the punch works without one.
+Once set:
+
+13. Confirm the swing plays for the attacker.
+14. Confirm the **other** player sees it too. Animations played on your own
+    character replicate automatically; if only you can see it, the animation
+    was loaded on the wrong Animator.

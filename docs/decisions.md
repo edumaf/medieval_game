@@ -253,3 +253,53 @@ building exactly the anti-cheat system this feature is explicitly not meant
 to add. Revisit this when Combat lands: at that point `Humanoid.Died` becoming
 meaningful for game logic (not just visuals) is the signal that this mirror
 needs to become an actively-defended one.
+
+## The client never names its punch target
+
+`PunchRequest` carries no arguments. The client reports that the player
+swung; `CombatService` works out who was in front of them, from server-side
+character positions, and applies the damage itself.
+
+The alternative — the client sending the target it thinks it hit, with the
+server validating range afterwards — is more common in Roblox projects and is
+noticeably easier to write. It also means the server is checking a claim
+rather than making a decision, and every such check is one exploit away from
+being incomplete: a modified client that reports a plausible-but-wrong target
+only has to satisfy the checks the server actually wrote. With no arguments
+there is nothing to validate, because there is nothing to lie about. The only
+thing a client controls is how often it asks, and that is rate-limited with
+the same cooldown constant the honest client uses.
+
+The cost is real and worth stating: server-side selection uses the server's
+view of positions, so a player on a bad connection will occasionally swing at
+someone who has already moved on the server and see nothing happen. That is
+the correct failure direction for a fighting game — a missed hit is a worse
+experience than a stolen one, but a stolen one is a worse *game*.
+
+Target selection is "nearest player inside a 120-degree cone" rather than a
+raycast or a hitbox. It costs one distance and one dot product per player, it
+has no dependency on limb colliders or animation timing, and it is entirely
+expressible in numbers — which is why `PunchRules` is unit-tested and
+`CombatService` is a thin wrapper around it. Revisit this when weapons with
+real reach arrive; a sword swing probably wants a shape query.
+
+`PunchRules` lives in `src/shared/Combat/`, not server-side, so the client can
+reuse `canPunch` to avoid firing a remote it already knows will be dropped.
+Nothing in it is worth hiding: knowing the reach and the cone angle does not
+let a modified client exceed either, since the server recomputes both. The
+alternative was a second copy of the same cooldown predicate on the client,
+which is exactly the kind of duplication that drifts.
+
+### What this means for the `Humanoid.Health` mirror
+
+The previous section left an open question: whether combat landing would make
+`Humanoid.Died` meaningful for game logic and force the health mirror to
+become actively defended. It does not, yet.
+
+`CombatService` reads `Humanoid` for nothing but position — liveness comes
+from `HealthService.isDead`, which is server state, and damage goes through
+`HealthService.takeDamage`. A client faking its own `Humanoid.Health` still
+appears alive and targetable to the server, and still takes damage normally.
+So the gap described above stays cosmetic and stays open. The signal to close
+it is kill credit, death rewards, or respawn timers keyed off `Humanoid.Died`
+— none of which exist yet.
