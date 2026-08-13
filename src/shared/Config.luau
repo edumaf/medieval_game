@@ -68,7 +68,7 @@ local Config = {
 	-- 3 is that geometric estimate (~3.5) tightened slightly further after
 	-- playtesting a real swing in Team Test. Revisit with the same reasoning
 	-- above if it starts missing hits that visibly connect.
-	PunchRange = 3.5,
+	PunchRange = 4.5,
 
 	-- Minimum seconds between one player's punches.
 	PunchCooldownSeconds = 0.6,
