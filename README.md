@@ -3,17 +3,20 @@
 A collaborative Roblox game built by a small team, with code in Git and the
 world in Roblox Studio.
 
-**No gameplay exists yet.** What is here is the foundation: the architecture,
-the toolchain, the tests, the CI, and the conventions. This README is the
-onboarding guide — if you follow it top to bottom you will end up with a working
-development environment and your first pull request merged, without asking
-anyone.
+**The game is playable, barely.** You can run, punch someone for 25 damage, and
+die. That is the whole of it — see [What exists so far](#what-exists-so-far).
+Everything else here is the foundation those systems were built on: the
+architecture, the toolchain, the tests, the CI, and the conventions. This README
+is the onboarding guide — if you follow it top to bottom you will end up with a
+working development environment and your first pull request merged, without
+asking anyone.
 
 ---
 
 ## Contents
 
 - [Project overview](#project-overview)
+- [What exists so far](#what-exists-so-far)
 - [Development philosophy](#development-philosophy)
 - [Tech stack](#tech-stack)
 - [Repository structure](#repository-structure)
@@ -59,9 +62,53 @@ A medieval-themed Roblox experience. The team is three developers, one UI
 designer and one builder. Everyone works on short-lived branches off `main` and
 merges through reviewed pull requests.
 
-The architecture is designed to absorb the systems we know are coming — combat,
+The architecture is designed to absorb the systems we know are coming —
 inventory, quests, NPCs, enemies, progression, currencies, player data — without
-being rebuilt. None of them exist yet, and that is deliberate.
+being rebuilt. Combat has started; the rest is still ahead.
+
+## What exists so far
+
+Enough to fight someone. Not enough to call it a game yet.
+
+### Controls
+
+| Input | Does |
+| --- | --- |
+| **Left click** | Throw a punch — 25 damage, ~4.5 studs, 120° cone in front of you |
+| **Left Shift** (hold) | Sprint (16 → 24 walkspeed) |
+| `/damage <n>`, `/heal <n>` | Developer-only test commands (see [Testing](#testing)) |
+
+### Systems
+
+| System | Where | What it does |
+| --- | --- | --- |
+| **Health** | `HealthService` + `HealthBarController` | 100 HP, server-authoritative, on-screen bar, death and respawn |
+| **Punch combat** | `CombatService` + `PunchController` + `PunchRules` | Left click, animated swing, server decides who was hit |
+| **Sprinting** | `RunningController` + `SprintState` | Hold Shift, client-side (see `docs/decisions.md` for why) |
+| **Session** | `SessionService` + `SessionController` | Boot handshake, detects a client on a stale build |
+
+Everything a player could profit from lying about — health, damage, who got hit
+— is decided on the server. The punch remote carries **no arguments at all**:
+the client says "I swung," and the server works out the rest from its own view
+of where everyone is standing.
+
+### Things worth knowing if you are about to touch combat
+
+- **The punch's timing comes from the animation, not from a timer.** The swing
+  has a `Hit` marker on the frame the fist connects, and that marker is what
+  fires the request. Re-exporting the animation without that marker stops
+  punches landing, silently.
+- **There is lag compensation.** A target running away is drawn nearer on the
+  attacker's screen than it really is on the server, which used to make chase
+  punches miss. `PunchRules.perceivedDistance` gives some of that back, capped
+  so it cannot become a ranged attack.
+- **All the numbers are in `src/shared/Config.luau`** — damage, reach, cooldown,
+  cone angle, sprint speed, lag allowance. Tune there, not in Studio.
+
+### Not built yet
+
+Stamina, blocking/parrying, weapons, inventory, quests, NPCs, enemies,
+progression, currency, player data persistence, and the map itself.
 
 ## Development philosophy
 
@@ -100,16 +147,25 @@ Why each of these and not the alternatives: [`docs/decisions.md`](docs/decisions
 src/
   shared/              → ReplicatedStorage.Shared     both sides can see this
     Types.luau           types that cross the client/server boundary
-    Config.luau          frozen tunables (nothing secret — clients can read it)
+    Config.luau          every tunable number in the game, frozen
+    Combat/PunchRules    pure punch arithmetic — reach, cone, cooldown, lag
     Net/                 remote registry; Remotes.luau declares every remote
     Runtime/             Bootstrap — the Init()/Start() lifecycle runner
     Util/                Logger and future shared helpers
   server/              → ServerScriptService.Server   authoritative gameplay
     init.server.luau     entry point
+    DeveloperAccess      who may run the /damage and /heal test commands
     Services/            one file per system
+      HealthService/       100 HP, damage, death, respawn
+      CombatService        decides who a punch hit, and for how much
+      SessionService       boot handshake, build-version check
   client/              → StarterPlayerScripts.Client  presentation and input
     init.client.luau     entry point
     Controllers/         one file per system, including UI logic
+      HealthBarController/ drives the Studio-authored health bar
+      PunchController      left click, swing animation, Hit marker
+      RunningController/   hold Shift to sprint
+      SessionController    the client half of the handshake
   client.project.json  → (scopes StarterPlayerScripts.Client to a LocalScript)
 
 tests/                 → ServerScriptService.Tests    Jest specs (dev build only)
