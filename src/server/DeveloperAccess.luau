@@ -36,8 +36,8 @@ local RunService = game:GetService("RunService")
 	Keep this list short and remove people when they leave the project.
 ]]
 local DEVELOPER_USER_IDS: { [number]: true } = {
-	-- [123456789] = true, -- alice
-	-- [987654321] = true, -- bob
+	[11399930306] = true, -- eduard (edutzu_gagicutzu)
+	[7836424153] = true, -- vlad (filipvlad2)
 }
 
 local DeveloperAccess = {}
