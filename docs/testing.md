@@ -28,6 +28,11 @@ tests/
   server/
     HealthService/
       HealthState.spec.luau
+  client/
+    RunningController/
+      SprintState.spec.luau
+    HealthBarController/
+      HealthDisplay.spec.luau
 ```
 
 Rojo maps `tests/` to `ServerScriptService.Tests`, and only in
@@ -139,6 +144,30 @@ both are no-ops outside Studio (`RunService:IsStudio()`).
 10. With a second player in the server, damage one player and confirm the
     other player's health is unaffected.
 11. Check Output for errors or warnings throughout.
+
+## Manual verification: Health bar
+
+`HealthBarController` drives the Studio-owned `StarterGui.HealthBar` from the
+local player's Humanoid, so the fill and label can only be checked by eye.
+`HealthDisplay.spec.luau` already covers the maths; these steps cover the
+wiring. Use the same `/damage` and `/heal` commands as above.
+
+1. Press **Play**. The bar appears only once real health arrives — confirm it
+   is not showing the designer's 75/100 preview at spawn, but 100/100 full.
+2. `/damage 25`, `/damage 25`, `/damage 25`. Confirm the fill steps down
+   through roughly three quarters, half and one quarter of the track, and the
+   label matches at each step.
+3. `/heal 50`. Confirm the fill grows again and the label agrees.
+4. `/damage 500`. Confirm the label reads exactly `0/100` and the fill is
+   fully empty, with no sliver of green left.
+5. Respawn. Confirm the bar returns to 100/100 and keeps updating — a bar that
+   freezes after the first death means the Humanoid connections were not
+   re-bound.
+6. Repeat damage/death/respawn several times. Confirm the label never lags a
+   step behind the fill, and Output stays clean.
+7. Confirm the bar keeps its designer-set position, size and styling
+   throughout — this controller only writes `Enabled`, `Fill.Size` and
+   `Amount.Text`.
 
 Jest Lua only runs inside Roblox, and CI has no Roblox Studio. The supported way
 to run tests headlessly is Roblox's **Open Cloud Luau Execution API**, which
