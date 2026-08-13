@@ -64,7 +64,7 @@ local function render(health: number, maxHealth: number)
 		return
 	end
 
-	fillFrame.Size = UDim2.new(HealthDisplay.fillFraction(health, maxHealth), 0, 1, 0)
+	fillFrame.Size = UDim2.fromScale(HealthDisplay.fillFraction(health, maxHealth), 1)
 	amountLabel.Text = HealthDisplay.text(health, maxHealth)
 end
 
