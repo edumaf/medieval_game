@@ -253,3 +253,165 @@ building exactly the anti-cheat system this feature is explicitly not meant
 to add. Revisit this when Combat lands: at that point `Humanoid.Died` becoming
 meaningful for game logic (not just visuals) is the signal that this mirror
 needs to become an actively-defended one.
+
+## The client never names its punch target
+
+`PunchRequest` carries no arguments. The client reports that the player
+swung; `CombatService` works out who was in front of them, from server-side
+character positions, and applies the damage itself.
+
+The alternative — the client sending the target it thinks it hit, with the
+server validating range afterwards — is more common in Roblox projects and is
+noticeably easier to write. It also means the server is checking a claim
+rather than making a decision, and every such check is one exploit away from
+being incomplete: a modified client that reports a plausible-but-wrong target
+only has to satisfy the checks the server actually wrote. With no arguments
+there is nothing to validate, because there is nothing to lie about. The only
+thing a client controls is how often it asks, and that is rate-limited with
+the same cooldown constant the honest client uses.
+
+The cost is real and worth stating: server-side selection uses the server's
+view of positions, so a player on a bad connection will occasionally swing at
+someone who has already moved on the server and see nothing happen. That is
+the correct failure direction for a fighting game — a missed hit is a worse
+experience than a stolen one, but a stolen one is a worse *game*.
+
+Target selection is "nearest player inside a 120-degree cone" rather than a
+raycast or a hitbox. It costs one distance and one dot product per player, it
+has no dependency on limb colliders or animation timing, and it is entirely
+expressible in numbers — which is why `PunchRules` is unit-tested and
+`CombatService` is a thin wrapper around it. Revisit this when weapons with
+real reach arrive; a sword swing probably wants a shape query.
+
+`PunchRules` lives in `src/shared/Combat/`, not server-side, so the client can
+reuse `canPunch` to avoid firing a remote it already knows will be dropped.
+Nothing in it is worth hiding: knowing the reach and the cone angle does not
+let a modified client exceed either, since the server recomputes both. The
+alternative was a second copy of the same cooldown predicate on the client,
+which is exactly the kind of duplication that drifts.
+
+### What this means for the `Humanoid.Health` mirror
+
+The previous section left an open question: whether combat landing would make
+`Humanoid.Died` meaningful for game logic and force the health mirror to
+become actively defended. It does not, yet.
+
+`CombatService` reads `Humanoid` for nothing but position — liveness comes
+from `HealthService.isDead`, which is server state, and damage goes through
+`HealthService.takeDamage`. A client faking its own `Humanoid.Health` still
+appears alive and targetable to the server, and still takes damage normally.
+So the gap described above stays cosmetic and stays open. The signal to close
+it is kill credit, death rewards, or respawn timers keyed off `Humanoid.Died`
+— none of which exist yet.
+
+## The punch animation's `Hit` marker is the attack's timing
+
+`PunchController` fires `PunchRequest` from
+`track:GetMarkerReachedSignal(Config.PunchHitMarkerName)`, not from the click
+that started the swing. The marker sits on the frame of `Punch_Right`
+(`rbxassetid://86842108763107`) where the fist actually connects.
+
+The alternative is a delay: click, `task.wait(0.25)`, fire. It is one line
+shorter and it is wrong twice over. It hard-codes a number that belongs to the
+animation, so re-exporting the swing with different timing silently
+desynchronises damage from what the player sees, with nothing failing loudly
+enough to notice. And it is a number nobody can derive — whoever tuned the
+keyframes already knows exactly when the punch lands, and the marker is how
+they say so. Polling `track.TimePosition` on `Heartbeat` has the same problem
+plus a per-frame cost, for a signal the engine already raises.
+
+The cost is that a missing or renamed marker stops punches landing entirely,
+with no error. That is why the marker name is in `Config` next to the asset id
+rather than buried as a string literal, and why `Config.spec.luau` asserts
+both are well-formed. Neither check can prove the marker exists inside the
+published asset — only Studio can, which is step 17 in `docs/testing.md`.
+
+Nothing moved to the client. The marker decides *when* the request is sent;
+`CombatService` still decides who was in range, whether they were alive, and
+how much damage they take. A modified client that fires `PunchRequest` on a
+loop still gets rate-limited by the same cooldown as everyone else, because
+the server never trusted the timing in the first place — it only trusts its
+own clock.
+
+### The cooldown did not need changing
+
+The request now arrives a fraction of a second later than the click, so
+`CombatService`'s cooldown window shifts by that fraction. It does not narrow:
+every punch is offset by the same marker delay, so the interval between two
+consecutive requests is still the interval between two clicks. The client
+keeps gating on the click rather than the marker, so a click made during the
+cooldown plays no swing at all — a swing that visibly happens but deals no
+damage would read as a bug.
+
+## Punch reach is judged against where the attacker saw the target
+
+`CombatService` corrects each candidate's distance with
+`PunchRules.perceivedDistance` before testing reach, using the target's own
+server-side `AssemblyLinearVelocity` and a fixed window
+(`Config.PunchLagCompensationSeconds`).
+
+Without it, chasing somebody was close to unplayable while punching a
+stationary opponent worked fine. Every client draws other players from
+replicated state, so the target on the attacker's screen is where the target
+*was*, roughly a round trip ago. A target running away is therefore drawn
+nearer than the server has it, by its own speed times that delay — at the
+sprint speed in `Config` that is around three and a half studs, which is most
+of an entire `PunchRange`. The attacker punches when the target looks well
+inside range and the server, checking a fresher position, correctly reports a
+miss. Both players are behaving honestly and the punch still fails, every time,
+in the same direction.
+
+This is the standard "I hit him on my screen" trade, and it is resolved the
+standard way: favour the attacker's view, because that is the only frame a
+player can actually aim in.
+
+The allowance is deliberately partial. Once `PunchRange` was tightened to an
+arm's length, returning the whole error would have given a sprinting runaway an
+effective reach past eight studs — wider than the sevens and fives that were
+tightened away precisely for landing punches across a visible gap. So
+`PunchMaxCompensationStuds` hands back about half of it: a chase punch reaches
+roughly six and a half, and some punches that genuinely looked like they
+connected on a full-sprint target will still miss. That is a real cost, and it
+is the right side to err on while the reach is this tight relative to the
+sprint speed — the alternative is a punch that visibly lands from too far, which
+is the complaint the range tuning was answering.
+
+Three things keep it from becoming a licence to hit anything. The allowance is
+computed from the *target's* velocity, so an attacker cannot manufacture reach
+for themselves — and a victim who lied about their own velocity would only make
+themselves easier to hit. It is capped in studs
+(`Config.PunchMaxCompensationStuds`), so a character that has been launched, or
+one reporting nonsense, cannot turn a punch into a ranged attack. And it only
+ever moves the distance, never the cone: `facingDot` is still computed from
+live positions, so nothing behind or beside the attacker becomes reachable no
+matter how fast it is travelling.
+
+A stationary target gets an allowance of exactly zero. That is deliberate — the
+cases that already worked had to keep behaving identically, and the clamp
+floors at zero so a target closing on the attacker is never pushed away.
+
+### Why a constant and not the attacker's ping
+
+`Player:GetNetworkPing` is the obvious source for the window and is not used.
+Its unit is genuinely unclear — the official reference does not pin it down and
+community sources disagree over seconds versus milliseconds — and reading it in
+the wrong one would silently clamp every punch to the ceiling, which looks like
+a working game with a suspiciously long reach rather than an error. It also
+scales reach with the attacker's own connection quality, which rewards a worse
+one. A constant treats every player the same, is a single number to tune after
+play-testing, and is trivially unit-testable. Per-player compensation is worth
+revisiting if the fixed window turns out to be visibly wrong for some players,
+and it needs the unit settled first.
+
+### What this does not do
+
+There is no position history and no rewind. The correction is a first-order
+reconstruction from current velocity, which is accurate for someone running in
+a straight line — the case that was broken — and degrades for someone changing
+direction inside the compensation window. A full rewind needs a per-player ring
+buffer sampled every frame, and `RunService.Heartbeat` needs a justification in
+this repository. It is not justified by a punch with a seven-stud reach.
+
+There is still no line-of-sight check, exactly as before: reach and cone are the
+whole test, and this change does not let a punch travel through anything it
+could not travel through yesterday.

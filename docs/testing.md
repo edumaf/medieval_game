@@ -25,7 +25,10 @@ tests/
   shared/
     Config.spec.luau
     Logger.spec.luau
+    Combat/
+      PunchRules.spec.luau
   server/
+    DeveloperAccess.spec.luau
     HealthService/
       HealthState.spec.luau
   client/
@@ -175,8 +178,9 @@ the reasoning (plus how to tighten it) is in `DeveloperAccess.luau`.
 integration — spawning, damage/heal through the chat commands, death, and
 respawn — can only be checked by hand in Studio (see `docs/decisions.md` for
 why `HealthService` keeps its own state instead of trusting `Humanoid.Health`
-directly). There is no Combat system yet, so the manual mechanism is
-`/damage <amount>` and `/heal <amount>` typed in chat.
+directly). The manual mechanism is `/damage <amount>` and `/heal <amount>`
+typed in chat, which lets you set up an exact health value without having to
+land a specific number of punches.
 
 Who may use those commands is decided by `src/server/DeveloperAccess.luau` —
 see "Which test mode to use" below before you try them with other people.
@@ -300,3 +304,105 @@ ROBLOX_OPEN_CLOUD_KEY=... ROBLOX_UNIVERSE_ID=... ROBLOX_TEST_PLACE_ID=... \
 ```
 
 Never put those values in a file inside the repository.
+
+## Manual verification: Punch
+
+`PunchRules` covers the arithmetic — cooldown, reach, cone, nearest-target
+selection — in `tests/shared/Combat/PunchRules.spec.luau`. What no unit test
+can cover is whether a punch actually connects between two real characters,
+so this needs two players.
+
+Use **Test → Clients and Servers** with 2 players (no allow-list needed), or
+Team Test if you are on separate machines.
+
+**Landing a hit**
+
+1. Stand player A directly in front of player B, close enough to touch.
+2. Left click on A. Confirm B's health bar drops by 25, and Output logs
+   `A punched B for 25 -> 75`.
+3. Punch three more times. Confirm B reaches exactly 0, dies once, and
+   respawns at 100.
+4. Confirm **A's** health never changes. You cannot punch yourself.
+
+**Not landing a hit**
+
+5. Face away from B and click. Confirm nothing happens — no damage, no log
+   line. The cone is 120 degrees, so "slightly off to the side" should still
+   connect; directly behind must not.
+6. Walk well away from B (more than about 3 studs) and click. Confirm
+   nothing happens.
+7. Click with nobody else in the server. Confirm no errors in Output.
+8. Punch B while B is dead. Confirm nothing happens.
+
+**Cooldown**
+
+9. Click as fast as you can. Confirm damage lands at most about twice a
+   second, not once per click, and that Output does not fill with warnings.
+
+**Crowd behaviour** (needs 3 players, or move a second character into place)
+
+10. With two targets in front of you at different distances, confirm the
+    **nearer** one takes the damage.
+11. With one player behind you and one in front, confirm the one **in front**
+    takes it — being closer must not let the player behind steal the hit.
+
+**Respawn**
+
+12. Die, respawn, and punch again. Confirm it still works — a punch that stops
+    working after your first death means the animation or character
+    references were not re-bound.
+13. Die and respawn several times, then punch **once**. Confirm B loses
+    exactly 25, not a multiple of it. Damage that scales with how many times
+    you have died means `CharacterAdded` is stacking marker connections
+    instead of replacing them.
+14. Punch, and while the swing is still playing, reset (Esc → Reset
+    Character). Confirm the dead character's swing does not damage anyone
+    after the new one spawns.
+
+**Animation**
+
+`Config.PunchAnimationId` is `rbxassetid://86842108763107` (Punch_Right), and
+its `Hit` marker is what fires `PunchRequest` — the click only starts the
+swing. Empty is still the supported "no animation" state, in which the hit is
+reported on the click instead; skip 16–18 if you have blanked the id.
+
+15. Confirm the swing plays for the attacker.
+16. Confirm the **other** player sees it too. Animations played on your own
+    character replicate automatically; if only you can see it, the animation
+    was loaded on the wrong Animator.
+17. Watch B's health bar against A's swing. Damage must land **mid-swing**, on
+    the frame the fist arrives — not on the click, and not when the animation
+    ends. This is the whole point of the marker; if damage lands instantly the
+    marker is not connected.
+18. Confirm one click deals damage exactly once. Two hits from one swing means
+    the marker is connected more than once.
+19. Confirm the punch reads over walking: run at B and punch while moving. The
+    swing must be visible, not overridden by the walk animation (that is what
+    `Action` priority is for).
+
+**Chasing a running target**
+
+This is the case lag compensation exists for, and the one that was broken. It
+needs both players moving; standing still will not reproduce it. Run it with
+two real clients — **Test → Clients and Servers** — not one client and a
+dummy, because the whole effect comes from B's position being replicated to A.
+
+20. Have B hold W and run in a straight line. Have A chase B holding W, sprint
+    (Left Shift) if needed to close, and stay directly behind B.
+21. While still moving, punch as soon as B looks within arm's reach on A's
+    screen. Confirm B takes 25 and Output logs `A punched B for 25 -> 75`.
+    Before the fix this is the punch that missed.
+22. Repeat four times without stopping. Confirm B dies and respawns — the fix
+    must hold up over repeated attacks, not just the first one.
+23. Run the same chase in the opposite direction, and again along a different
+    axis. The correction is computed from B's velocity, so it must not depend
+    on which way the two of you are facing in the world.
+24. Now have B outrun A properly — B sprinting, A walking — until B is clearly
+    far ahead, well past arm's reach on A's screen. Punch. Confirm **nothing**
+    happens. The allowance is a few studs, not a licence to hit at any range.
+25. With both of you still running, have B cut sideways across A's view rather
+    than away. Confirm punching at the empty space ahead of A does not hit B:
+    the correction moves the reach check along the line to B, never the cone.
+26. Stand still, both of you, and punch at normal range. Confirm it behaves
+    exactly as it did before — a stationary target gets no allowance at all,
+    so any change in feel here means something is wrong.
