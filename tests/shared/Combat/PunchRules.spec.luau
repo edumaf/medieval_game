@@ -17,6 +17,24 @@ local it = JestGlobals.it
 local COOLDOWN = 0.6
 local RANGE = 7
 local MIN_FACING_DOT = 0.5
+local LAG = 0.15
+local MAX_COMPENSATION = 2
+local SPRINT = 24
+-- Fast enough to be worth compensating, slow enough that the ceiling above
+-- does not swallow the result — useful for testing the arithmetic itself
+-- rather than the clamp.
+local JOG = 8
+
+--[[
+	A candidate built the way CombatService builds one: the distance it carries
+	is already corrected for replication lag.
+]]
+local function candidate(distance: number, recedeSpeed: number, facingDot: number)
+	return {
+		distance = PunchRules.perceivedDistance(distance, recedeSpeed, LAG, MAX_COMPENSATION),
+		facingDot = facingDot,
+	}
+end
 
 describe("PunchRules.canPunch", function()
 	it("allows a player who has never punched", function()
@@ -97,6 +115,113 @@ describe("PunchRules.isInReach", function()
 		expect(PunchRules.isInReach({ distance = 1, facingDot = -1 }, RANGE, MIN_FACING_DOT)).toBe(
 			false
 		)
+	end)
+end)
+
+describe("PunchRules.perceivedDistance", function()
+	it("leaves a stationary target exactly where it is", function()
+		-- The correction exists for lag on a moving target. A target standing
+		-- still is in the same place in every frame of reference, so a
+		-- stationary punch must behave precisely as it did before.
+		expect(PunchRules.perceivedDistance(6, 0, LAG, MAX_COMPENSATION)).toBe(6)
+	end)
+
+	it("does not push a closing target away", function()
+		-- A target running at the attacker is drawn further off than it really
+		-- is, so the server already sees it closer than the attacker did.
+		-- Correcting that direction too would make head-on punches harder to
+		-- land than they are today.
+		expect(PunchRules.perceivedDistance(6, -SPRINT, LAG, MAX_COMPENSATION)).toBe(6)
+	end)
+
+	it("gives a receding target back the ground its copy is behind by", function()
+		expect(PunchRules.perceivedDistance(9, JOG, LAG, MAX_COMPENSATION)).toBeCloseTo(
+			9 - JOG * LAG,
+			5
+		)
+	end)
+
+	it("scales the allowance with how fast the target is receding", function()
+		local slow = PunchRules.perceivedDistance(9, 4, LAG, MAX_COMPENSATION)
+		local fast = PunchRules.perceivedDistance(9, JOG, LAG, MAX_COMPENSATION)
+		expect(fast < slow).toBe(true)
+	end)
+
+	it("caps the allowance at a full sprint", function()
+		-- At the shipped sprint speed the real error is around 3.6 studs, more
+		-- than the ceiling, so a sprinting target is deliberately given back
+		-- only part of it. Reach stays close to what an arm looks like.
+		expect(SPRINT * LAG > MAX_COMPENSATION).toBe(true)
+		expect(PunchRules.perceivedDistance(9, SPRINT, LAG, MAX_COMPENSATION)).toBe(
+			9 - MAX_COMPENSATION
+		)
+	end)
+
+	it("never hands out more than the stud ceiling", function()
+		-- A character that has been launched, or one reporting a nonsense
+		-- velocity, must not turn the punch into a ranged attack.
+		expect(PunchRules.perceivedDistance(50, 1000, LAG, MAX_COMPENSATION)).toBe(
+			50 - MAX_COMPENSATION
+		)
+	end)
+
+	it("never reports a negative distance", function()
+		expect(PunchRules.perceivedDistance(1, SPRINT, LAG, MAX_COMPENSATION)).toBe(0)
+	end)
+
+	it("does nothing when compensation is switched off", function()
+		expect(PunchRules.perceivedDistance(9, SPRINT, 0, MAX_COMPENSATION)).toBe(9)
+	end)
+end)
+
+describe("the chase the compensation exists for", function()
+	-- Attacker and victim both sprinting the same way, victim ahead and
+	-- directly in front. Their separation is constant, but the victim's
+	-- replicated copy trails its real position, which is what used to make
+	-- these punches miss.
+
+	it("lands a punch on a fleeing victim the attacker saw in range", function()
+		-- Sitting just outside reach on the server's fresh view, and inside it
+		-- on the screen the attacker was aiming at.
+		local chased = candidate(RANGE + 1, SPRINT, 1)
+		expect(RANGE + 1 > RANGE).toBe(true)
+		expect(PunchRules.isInReach(chased, RANGE, MIN_FACING_DOT)).toBe(true)
+	end)
+
+	it("still refuses a victim who is genuinely out of reach", function()
+		-- Far enough that even the whole ceiling does not bring it inside.
+		local escaped = candidate(RANGE + MAX_COMPENSATION + 2, SPRINT, 1)
+		expect(PunchRules.isInReach(escaped, RANGE, MIN_FACING_DOT)).toBe(false)
+	end)
+
+	it("does not let the allowance reach around behind the attacker", function()
+		-- Distance is corrected; the cone is not. Somebody sprinting away
+		-- behind the attacker stays unhittable however fast they run.
+		local behind = candidate(3, SPRINT, -1)
+		expect(PunchRules.isInReach(behind, RANGE, MIN_FACING_DOT)).toBe(false)
+	end)
+
+	it("does not widen the cone for a target off to the side", function()
+		local beside = candidate(3, SPRINT, 0)
+		expect(PunchRules.isInReach(beside, RANGE, MIN_FACING_DOT)).toBe(false)
+	end)
+
+	it("leaves an attacker closing on a stationary victim unchanged", function()
+		-- The attacker's own movement is not part of the correction, so this
+		-- is the same arithmetic it always was.
+		expect(PunchRules.isInReach(candidate(5, 0, 1), RANGE, MIN_FACING_DOT)).toBe(true)
+		expect(PunchRules.isInReach(candidate(9, 0, 1), RANGE, MIN_FACING_DOT)).toBe(false)
+	end)
+
+	it("picks the target the attacker saw as nearest", function()
+		-- A victim sprinting away at 8 studs was drawn nearer than a
+		-- stationary bystander at 6.5. The attacker aimed at whichever looked
+		-- closest, so that is the one who takes it.
+		local candidates = {
+			candidate(6.5, 0, 1),
+			candidate(8, SPRINT, 1),
+		}
+		expect(PunchRules.selectTargetIndex(candidates, RANGE, MIN_FACING_DOT)).toBe(2)
 	end)
 end)
 

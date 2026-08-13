@@ -342,3 +342,76 @@ consecutive requests is still the interval between two clicks. The client
 keeps gating on the click rather than the marker, so a click made during the
 cooldown plays no swing at all — a swing that visibly happens but deals no
 damage would read as a bug.
+
+## Punch reach is judged against where the attacker saw the target
+
+`CombatService` corrects each candidate's distance with
+`PunchRules.perceivedDistance` before testing reach, using the target's own
+server-side `AssemblyLinearVelocity` and a fixed window
+(`Config.PunchLagCompensationSeconds`).
+
+Without it, chasing somebody was close to unplayable while punching a
+stationary opponent worked fine. Every client draws other players from
+replicated state, so the target on the attacker's screen is where the target
+*was*, roughly a round trip ago. A target running away is therefore drawn
+nearer than the server has it, by its own speed times that delay — at the
+sprint speed in `Config` that is around three and a half studs, which is most
+of an entire `PunchRange`. The attacker punches when the target looks well
+inside range and the server, checking a fresher position, correctly reports a
+miss. Both players are behaving honestly and the punch still fails, every time,
+in the same direction.
+
+This is the standard "I hit him on my screen" trade, and it is resolved the
+standard way: favour the attacker's view, because that is the only frame a
+player can actually aim in.
+
+The allowance is deliberately partial. Once `PunchRange` was tightened to an
+arm's length, returning the whole error would have given a sprinting runaway an
+effective reach past eight studs — wider than the sevens and fives that were
+tightened away precisely for landing punches across a visible gap. So
+`PunchMaxCompensationStuds` hands back about half of it: a chase punch reaches
+roughly six and a half, and some punches that genuinely looked like they
+connected on a full-sprint target will still miss. That is a real cost, and it
+is the right side to err on while the reach is this tight relative to the
+sprint speed — the alternative is a punch that visibly lands from too far, which
+is the complaint the range tuning was answering.
+
+Three things keep it from becoming a licence to hit anything. The allowance is
+computed from the *target's* velocity, so an attacker cannot manufacture reach
+for themselves — and a victim who lied about their own velocity would only make
+themselves easier to hit. It is capped in studs
+(`Config.PunchMaxCompensationStuds`), so a character that has been launched, or
+one reporting nonsense, cannot turn a punch into a ranged attack. And it only
+ever moves the distance, never the cone: `facingDot` is still computed from
+live positions, so nothing behind or beside the attacker becomes reachable no
+matter how fast it is travelling.
+
+A stationary target gets an allowance of exactly zero. That is deliberate — the
+cases that already worked had to keep behaving identically, and the clamp
+floors at zero so a target closing on the attacker is never pushed away.
+
+### Why a constant and not the attacker's ping
+
+`Player:GetNetworkPing` is the obvious source for the window and is not used.
+Its unit is genuinely unclear — the official reference does not pin it down and
+community sources disagree over seconds versus milliseconds — and reading it in
+the wrong one would silently clamp every punch to the ceiling, which looks like
+a working game with a suspiciously long reach rather than an error. It also
+scales reach with the attacker's own connection quality, which rewards a worse
+one. A constant treats every player the same, is a single number to tune after
+play-testing, and is trivially unit-testable. Per-player compensation is worth
+revisiting if the fixed window turns out to be visibly wrong for some players,
+and it needs the unit settled first.
+
+### What this does not do
+
+There is no position history and no rewind. The correction is a first-order
+reconstruction from current velocity, which is accurate for someone running in
+a straight line — the case that was broken — and degrades for someone changing
+direction inside the compensation window. A full rewind needs a per-player ring
+buffer sampled every frame, and `RunService.Heartbeat` needs a justification in
+this repository. It is not justified by a punch with a seven-stud reach.
+
+There is still no line-of-sight check, exactly as before: reach and cone are the
+whole test, and this change does not let a punch travel through anything it
+could not travel through yesterday.

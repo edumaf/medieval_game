@@ -78,6 +78,37 @@ local Config = {
 	-- never behind you.
 	PunchMinFacingDot = 0.5,
 
+	-- How far behind the server's view of the world the attacker's screen is
+	-- assumed to be. A target running away is drawn nearer than it really is
+	-- by its own speed times this, and PunchRules.perceivedDistance gives that
+	-- much back before judging reach. Roughly a round trip on an ordinary
+	-- connection.
+	--
+	-- A fixed value rather than the attacker's measured ping on purpose.
+	-- Player:GetNetworkPing is undocumented enough that community sources
+	-- disagree over whether it returns seconds or milliseconds — reading it in
+	-- the wrong unit would silently pin every punch to the cap — and deriving
+	-- reach from a number the attacker's own connection influences hands more
+	-- range to worse connections. A constant treats everyone the same and can
+	-- be tuned once the punch has been played.
+	PunchLagCompensationSeconds = 0.15,
+
+	-- Hard ceiling on that allowance, whatever the target's speed.
+	--
+	-- At the sprint speed above the uncorrected error is about 3.6 studs,
+	-- which is now most of an entire PunchRange. Handing all of it back would
+	-- give a sprinting runaway an effective reach past 8 — wider than the 7
+	-- and 5 that were both tightened away for landing punches across a visible
+	-- gap. So this deliberately returns only part of the error: a chase punch
+	-- reaches about 6.5, and some genuinely-saw-it-connect punches on a
+	-- full-sprint target will still miss.
+	--
+	-- That trade only exists while the reach is this tight relative to the
+	-- sprint speed. Raise this if chases still feel unresponsive, lower it if
+	-- punches start landing from further than an arm looks; a stationary
+	-- target is unaffected either way, because its allowance is always zero.
+	PunchMaxCompensationStuds = 2,
+
 	-- rbxassetid:// of the punch animation (Punch_Right, R15). Empty string
 	-- means "no animation uploaded yet" — the punch still works, it just
 	-- plays nothing and reports the hit on the click instead.

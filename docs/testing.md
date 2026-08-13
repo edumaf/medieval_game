@@ -379,3 +379,30 @@ reported on the click instead; skip 16–18 if you have blanked the id.
 19. Confirm the punch reads over walking: run at B and punch while moving. The
     swing must be visible, not overridden by the walk animation (that is what
     `Action` priority is for).
+
+**Chasing a running target**
+
+This is the case lag compensation exists for, and the one that was broken. It
+needs both players moving; standing still will not reproduce it. Run it with
+two real clients — **Test → Clients and Servers** — not one client and a
+dummy, because the whole effect comes from B's position being replicated to A.
+
+20. Have B hold W and run in a straight line. Have A chase B holding W, sprint
+    (Left Shift) if needed to close, and stay directly behind B.
+21. While still moving, punch as soon as B looks within arm's reach on A's
+    screen. Confirm B takes 25 and Output logs `A punched B for 25 -> 75`.
+    Before the fix this is the punch that missed.
+22. Repeat four times without stopping. Confirm B dies and respawns — the fix
+    must hold up over repeated attacks, not just the first one.
+23. Run the same chase in the opposite direction, and again along a different
+    axis. The correction is computed from B's velocity, so it must not depend
+    on which way the two of you are facing in the world.
+24. Now have B outrun A properly — B sprinting, A walking — until B is clearly
+    far ahead, well past arm's reach on A's screen. Punch. Confirm **nothing**
+    happens. The allowance is a few studs, not a licence to hit at any range.
+25. With both of you still running, have B cut sideways across A's view rather
+    than away. Confirm punching at the empty space ahead of A does not hit B:
+    the correction moves the reach check along the line to B, never the cone.
+26. Stand still, both of you, and punch at normal range. Confirm it behaves
+    exactly as it did before — a stationary target gets no allowance at all,
+    so any change in feel here means something is wrong.

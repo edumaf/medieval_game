@@ -9,6 +9,12 @@
 	the only thing a modified client can influence is how often it asks — and
 	that is rate-limited here with the same cooldown the honest client uses.
 
+	Reach is judged against where the attacker's screen showed each target
+	rather than where the server has it right now, because a replicated
+	character is always drawn a little behind. The correction is bounded, is
+	computed from the target's own server-side velocity, and applies to
+	distance only — see PunchRules.perceivedDistance.
+
 	Damage goes through HealthService rather than touching Humanoid.Health, so
 	the existing clamping, death and respawn rules apply unchanged.
 
@@ -96,14 +102,23 @@ local function onPunchRequest(attacker: Player)
 
 		local offset = targetRoot.Position - origin
 		local distance = offset.Magnitude
+		-- Two characters occupying the same spot have no meaningful direction
+		-- between them; treat that as dead ahead rather than normalising a
+		-- zero vector.
+		local direction = if distance > 0 then offset.Unit else lookVector
 
 		table.insert(targets, target)
 		table.insert(candidates, {
-			distance = distance,
-			-- Two characters occupying the same spot have no meaningful
-			-- direction between them; treat that as dead ahead rather than
-			-- normalising a zero vector.
-			facingDot = if distance > 0 then lookVector:Dot(offset.Unit) else 1,
+			-- Judged against where the attacker saw this target rather than
+			-- where it is now, so a target sprinting away is not missed purely
+			-- because its replicated copy lags. See PunchRules.
+			distance = PunchRules.perceivedDistance(
+				distance,
+				targetRoot.AssemblyLinearVelocity:Dot(direction),
+				Config.PunchLagCompensationSeconds,
+				Config.PunchMaxCompensationStuds
+			),
+			facingDot = lookVector:Dot(direction),
 		})
 	end
 
