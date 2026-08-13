@@ -507,19 +507,47 @@ instead; skip steps 2–4 if you have done that.
     protect the other.
 31. Leave the server while guarding, rejoin, and confirm you spawn unprotected
     at speed 16.
+32. Press Q as fast as you possibly can, repeatedly, from a standing start.
+    Confirm every parry that visibly reaches the Hold pose **actually
+    protects** — punch from the front on each one. A guard that animates but
+    does not protect means a valid transition is being dropped somewhere, which
+    is the bug `ParryMaxHoldSeconds` and the removal of the transition rate
+    limiter were meant to make impossible.
+33. Press Q within the first instant of spawning, before the character has
+    finished loading. Confirm you either get a normal parry with a visible
+    wind-up, or nothing at all — you must **never** be protected immediately
+    with no animation.
+
+**Maximum hold** (`Config.ParryMaxHoldSeconds`, 5s)
+
+34. Hold Q and keep holding it. Have the other player punch you from the front
+    at 2 seconds. Confirm 0 damage.
+35. Keep holding, and have them punch you from the front again after 6 seconds
+    of continuous holding. Confirm you now take the **normal 25** — the guard
+    has outlived its allowed lifetime. Your client will still be showing the
+    Hold pose; that divergence is expected and documented.
+36. Release Q and press it again. Confirm a fresh guard protects you normally,
+    so the expiry is per-guard and not sticky.
 
 **Movement interaction**
 
-32. Hold Shift to sprint (24), then press Q while still sprinting. Confirm the
+37. Hold Shift to sprint (24), then press Q while still sprinting. Confirm the
     speed drops to 8.
-33. Release Q while still holding Shift. Confirm the speed goes straight back
+38. Release Q while still holding Shift. Confirm the speed goes straight back
     to **24**, not 16 — a parry must not strand a sprinting player at walking
     speed.
-34. Hold Q, then press and release Shift underneath it. Confirm the speed stays
+39. Hold Q, then press and release Shift underneath it. Confirm the speed stays
     at 8 throughout.
-35. After several parry/sprint combinations, release everything and confirm the
+40. After several parry/sprint combinations, release everything and confirm the
     speed settles at exactly 16 with no modifier left behind.
 
-36. Check Output for errors or warnings throughout. In particular, a
-    `sent a malformed parry transition` warning during honest play means
-    something is wrong with the controller, not with the player.
+**Counterpunch**
+
+41. Hold Q, release it, and immediately left click. Confirm the punch comes out
+    and lands. Then repeat, clicking as close to the release as you can manage.
+    A punch that silently vanishes **and** leaves you unable to punch again for
+    half a second means the parry rejection is consuming the punch cooldown.
+
+42. Check Output for errors or warnings throughout. Malformed parry payloads are
+    dropped silently by design, so nothing should appear there during honest
+    play at all.

@@ -79,21 +79,27 @@ local function onPunchRequest(attacker: Player)
 		-- anyone wanting to flood the output.
 		return
 	end
-	-- Recorded before the hit checks, so a swing that connects with nothing
-	-- still costs the attacker their cooldown.
-	lastPunchAt[attacker] = now
-
-	local attackerRoot = rootPartOf(attacker)
-	if attackerRoot == nil or not isAlive(attacker) then
-		return
-	end
 
 	-- No punching out of a guard, whether the parry is still winding up or is
 	-- already held: both hands are busy either way. PunchController refuses to
 	-- play the swing too, but that gate is presentation — this is the one that
 	-- decides, and it is here rather than in ParryService so the punch keeps a
 	-- single authoritative path.
+	--
+	-- Checked before the cooldown is recorded, unlike the hit checks below. A
+	-- swing that misses is still a swing and costs the attacker their cooldown;
+	-- this one never happened at all. Charging for it would eat the counterpunch
+	-- of anyone whose release of Q is still in flight when they click.
 	if ParryService.isEngaged(attacker) then
+		return
+	end
+
+	-- Recorded before the hit checks, so a swing that connects with nothing
+	-- still costs the attacker their cooldown.
+	lastPunchAt[attacker] = now
+
+	local attackerRoot = rootPartOf(attacker)
+	if attackerRoot == nil or not isAlive(attacker) then
 		return
 	end
 

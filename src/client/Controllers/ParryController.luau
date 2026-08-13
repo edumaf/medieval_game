@@ -19,6 +19,13 @@
 	rather than by looping it or re-playing it, so the animation is started
 	exactly once per parry and the marker fires exactly once.
 
+	This controller does not enforce Config.ParryMaxHoldSeconds, and does not
+	try to mirror it. The ceiling exists to bound what a client that stops
+	reporting can sit in, so enforcing it here would be enforcing it in the one
+	place that cannot be trusted to. The visible consequence is that holding Q
+	past the ceiling keeps showing the guard pose after the server has stopped
+	honouring it — see docs/decisions.md, where that divergence is accepted.
+
 	The animation is played on the local character's own Animator. A player's
 	character is client-network-owned, so that play call replicates to the
 	server and to everyone else without any extra remote — the same reason
@@ -111,7 +118,7 @@ local function endParry()
 		return
 	end
 
-	state = ParryState.apply(state, "end")
+	state = ParryState.apply(state, "end", os.clock())
 
 	local track = parryTrack
 	if track then
@@ -137,7 +144,7 @@ local function onHoldReached()
 		return
 	end
 
-	state = ParryState.apply(state, "hold")
+	state = ParryState.apply(state, "hold", os.clock())
 
 	local track = parryTrack
 	if track then
@@ -219,18 +226,36 @@ local function onInputBegan(input: InputObject, gameProcessedEvent: boolean)
 		return
 	end
 
-	state = ParryState.apply(state, "begin")
+	local track = parryTrack
+
+	-- A missing track means one of two completely different things, and they
+	-- must not share a path.
+	--
+	-- Deliberately switched off (an empty ParryAnimationId) is a supported
+	-- deployment state, handled below by reaching the guard on the press.
+	--
+	-- Configured but not loaded is transient: the character is still spawning,
+	-- WaitForChild has not returned, a respawn race dropped the bind, or
+	-- LoadAnimation failed. Treating that like "no animation" would hand a
+	-- player instant protection with no wind-up and no visible guard simply for
+	-- pressing Q early enough after spawning. Refuse the attempt instead, before
+	-- any state is entered, so there is nothing to unwind and nothing to
+	-- desynchronise -- the next press, a moment later, works normally.
+	if track == nil and Config.ParryAnimationId ~= "" then
+		return
+	end
+
+	state = ParryState.apply(state, "begin", os.clock())
 	-- The slowdown starts with the attempt, not with the guard, so a parry that
 	-- is cancelled before Hold has still cost the player something.
 	RunningController.setParryActive(true)
 	sendTransition("begin")
 
-	local track = parryTrack
 	if track == nil then
-		-- No animation, so no marker will ever arrive. Reach the guard on the
-		-- press, which is what PunchController does for its own missing
-		-- animation. Without this the player would be slowed and unable to
-		-- punch, but never protected.
+		-- No animation is configured, so no marker will ever arrive. Reach the
+		-- guard on the press, which is what PunchController does for its own
+		-- missing animation. Without this the player would be slowed and unable
+		-- to punch, but never protected.
 		onHoldReached()
 		return
 	end

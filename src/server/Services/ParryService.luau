@@ -9,16 +9,21 @@
 	the direction this punch came from?" — both answered here, from server state
 	and server-side character positions.
 
-	What a modified client can do is send the three transitions early or out of
-	order. That buys it one thing: skipping the wind-up. It cannot widen the
-	arc, because the direction is recomputed here from both root parts; it
-	cannot guard while dead or after respawning, because a character being
-	replaced clears the record; and it cannot claim protection it did not ask
-	for, because "hold" with no attempt behind it is a no-op inside ParryState.
-	There is deliberately no server-side timing floor on the wind-up — see
-	docs/decisions.md.
+	What the server actually guarantees, and what it does not, is written out in
+	docs/decisions.md. In short: the protected state, the direction and the
+	maximum hold are decided here; the movement slowdown is not, because
+	WalkSpeed is still client-authoritative. A modified client can therefore
+	skip the wind-up, guard without playing the animation, and guard at full
+	speed. It cannot widen the arc, guard from the rear, keep a guard alive past
+	Config.ParryMaxHoldSeconds, or punch while the server has it engaged.
 
-	Follows the CombatService pattern: state in module-local tables keyed by
+	Every transition that arrives with a legal shape is applied. There is no
+	rate limiter on the phase, deliberately: dropping a valid transition would
+	leave the client believing it is protected while this table says otherwise,
+	and a silent one-sided loss of protection is far worse than the spam it
+	would prevent. The state machine already makes repeats idempotent.
+
+	Follows the CombatService pattern: state in a module-local table keyed by
 	Player, Init() registers the remote handler before any client can reach it,
 	and per-player state is released on PlayerRemoving.
 ]]
@@ -28,15 +33,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
-local Logger = require(Shared.Util.Logger)
 local Net = require(Shared.Net)
 local ParryState = require(Shared.Combat.ParryState)
-local PunchRules = require(Shared.Combat.PunchRules)
-
-local log = Logger.forScope("ParryService")
 
 local states: { [Player]: ParryState.ParryState } = {}
-local lastAttemptAt: { [Player]: number } = {}
 
 local ParryService = {}
 
@@ -53,32 +53,20 @@ local function onParryStateRequest(player: Player, transition: any)
 	-- Anything a client sends is untrusted, including its type. For this remote
 	-- the type check and the range check are the same check: there are exactly
 	-- three legal values and everything else is dropped.
-	if not ParryState.isTransition(transition) then
-		log.warn(`{player.Name} sent a malformed parry transition; ignoring it`)
-		return
-	end
-	local requested = transition :: ParryState.Transition
-
-	-- Rate-limited on "begin" alone. "hold" and "end" are idempotent and can
-	-- never grant anything a "begin" has not already granted, and dropping an
-	-- "end" is the one failure that would leave somebody protected after they
-	-- let go — so a release is always accepted, however fast it arrives.
 	--
-	-- PunchRules.canPunch is reused rather than copied: it is exactly this
-	-- predicate ("has enough time passed, given a possibly-nil last time and a
-	-- clock that may have gone backwards"), and a second hand-written copy of
-	-- it is the kind of duplication that drifts. Only the constant differs.
-	if requested == "begin" then
-		local now = os.clock()
-		if not PunchRules.canPunch(lastAttemptAt[player], now, Config.ParryMinAttemptSeconds) then
-			return
-		end
-		lastAttemptAt[player] = now
+	-- Dropped silently, with no warn. The payload is entirely attacker
+	-- controlled, so a line per rejected message is a way to flood the output
+	-- on demand — the same reasoning CombatService gives for not logging a
+	-- punch that arrives inside its cooldown.
+	if not ParryState.isTransition(transition) then
+		return
 	end
 
 	-- Illegal orderings are no-ops inside the state machine rather than special
-	-- cases here, so this handler never has to reason about what came before.
-	states[player] = ParryState.apply(stateOf(player), requested)
+	-- cases here, so this handler never has to reason about what came before —
+	-- and every legal transition is applied, always.
+	local requested = transition :: ParryState.Transition
+	states[player] = ParryState.apply(stateOf(player), requested, os.clock())
 end
 
 --[[
@@ -87,25 +75,30 @@ end
 	CombatService uses this to refuse a punch thrown out of a guard. It covers
 	the wind-up as well as the held guard on purpose: the attempt is what costs
 	the player their swing, so cancelling before Hold is not a way to punch for
-	free.
+	free. It also covers a guard that has outlived Config.ParryMaxHoldSeconds —
+	the protection expires, the commitment does not, so holding the key still
+	means no punching.
 ]]
 function ParryService.isEngaged(player: Player): boolean
 	return ParryState.isEngaged(stateOf(player))
 end
 
 --[[
-	Whether `defender` is holding a guard that covers the direction an attack
-	from `attackerPosition` arrives from.
+	Whether `defender` is holding a live guard that covers the direction an
+	attack from `attackerPosition` arrives from.
 
-	The caller passes the root part it has already resolved rather than this
-	service looking it up again, so there is one character lookup per punch and
-	no second copy of CombatService's rootPartOf.
+	A thin wrapper, on purpose: it reads the two things only the engine can tell
+	it — where the defender is and which way they are facing — and hands them to
+	ParryState, which owns the arithmetic and is unit-tested. Nothing is decided
+	here.
 
-	The direction is computed here, from the defender's own CFrame, and is
-	deliberately not lag-compensated: PunchRules corrects distance only, and the
-	cone it judges is likewise taken from live positions. A guard that widened
-	itself according to how fast somebody was running would be a different
-	feature.
+	The caller passes the root part it has already resolved, so there is one
+	character lookup per punch and no second copy of CombatService's rootPartOf.
+
+	The direction is taken from live positions and is deliberately not
+	lag-compensated: PunchRules corrects distance only, and the cone it judges is
+	likewise live. A guard that widened itself according to how fast somebody was
+	running would be a different feature.
 ]]
 function ParryService.isProtectedFrom(
 	defender: Player,
@@ -113,18 +106,28 @@ function ParryService.isProtectedFrom(
 	attackerPosition: Vector3
 ): boolean
 	local state = stateOf(defender)
-	if not ParryState.isActive(state) then
+	local now = os.clock()
+
+	-- A guard that has run out is cleared here rather than by a timer. This is
+	-- the moment somebody actually asked, which makes it the cheapest possible
+	-- place to notice, and it stops an abandoned "active" sitting in the table
+	-- until the character is replaced.
+	if ParryState.isExpired(state, now, Config.ParryMaxHoldSeconds) then
+		states[defender] = nil
 		return false
 	end
 
-	local lookVector = defenderRoot.CFrame.LookVector
-	local offset = attackerPosition - defenderRoot.Position
-	-- Two characters occupying the same spot have no meaningful direction
-	-- between them; treat that as dead ahead rather than normalising a zero
-	-- vector, matching how CombatService handles the same degenerate case.
-	local direction = if offset.Magnitude > 0 then offset.Unit else lookVector
+	local rootCFrame = defenderRoot.CFrame
+	local attackerDot =
+		ParryState.attackerDot(rootCFrame.LookVector, rootCFrame.Position, attackerPosition)
 
-	return ParryState.isProtectedFrom(state, lookVector:Dot(direction), Config.ParryMinFacingDot)
+	return ParryState.isProtectedFrom(
+		state,
+		attackerDot,
+		Config.ParryMinFacingDot,
+		now,
+		Config.ParryMaxHoldSeconds
+	)
 end
 
 function ParryService.Init()
@@ -142,8 +145,13 @@ end
 --[[
 	A character being replaced ends whatever guard it was holding. Without this
 	a player who died mid-parry would respawn still protected, having never
-	pressed Q for the new character — the exact stale state that would turn a
-	dropped "end" into permanent front-immunity.
+	pressed Q for the new character.
+
+	Note this is about character replacement, not death: a player who is dead but
+	whose character is still around keeps their record until it is swapped out.
+	Nothing can reach it in the meantime, because CombatService filters dead
+	players out of target selection before it ever asks about a guard — the
+	liveness guarantee lives there, not here.
 
 	Player.CharacterRemoving is an event on the Player instance, which Roblox
 	disconnects when they leave, so — unlike a per-character Humanoid connection
@@ -158,10 +166,9 @@ end
 function ParryService.Start()
 	Players.PlayerAdded:Connect(attachPlayer)
 	Players.PlayerRemoving:Connect(function(player: Player)
-		-- Without this, every player who has ever parried stays in both tables
-		-- for the lifetime of the server.
+		-- Without this, every player who has ever parried stays in the table for
+		-- the lifetime of the server.
 		states[player] = nil
-		lastAttemptAt[player] = nil
 	end)
 
 	-- A player can already be here before this service starts.
