@@ -20,10 +20,10 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
+local DeveloperAccess = require(script.Parent.Parent.DeveloperAccess)
 local Logger = require(Shared.Util.Logger)
 
 local HealthState = require(script.HealthState)
@@ -169,11 +169,11 @@ function HealthService.heal(player: Player, amount: number): number?
 end
 
 --[[
-	Studio-only manual test hook: typing "/damage 20" or "/heal 20" in chat
-	calls the matching API above. There is no Combat system yet to exercise
-	takeDamage/heal by hand any other way. Gated to RunService:IsStudio(), so
-	this does nothing — and cannot be reached by any client — on a published
-	server.
+	Manual test hook: typing "/damage 20" or "/heal 20" in chat calls the
+	matching API above. There is no Combat system yet to exercise
+	takeDamage/heal by hand any other way. Who may reach this is decided by
+	DeveloperAccess — see that module for why it is not a plain IsStudio()
+	check.
 ]]
 local function onChatted(player: Player, message: string)
 	local command, amountText = string.match(message, "^/(%a+)%s+(%-?%d+)$")
@@ -190,8 +190,9 @@ local function onChatted(player: Player, message: string)
 end
 
 --[[
-	Wires up one player: current and future characters, and (in Studio only)
-	the manual damage/heal chat commands. Player.CharacterAdded,
+	Wires up one player: current and future characters, and — for whoever
+	DeveloperAccess allows — the manual damage/heal chat commands.
+	Player.CharacterAdded,
 	Player.CharacterRemoving and Player.Chatted are events on the Player
 	instance itself, which Roblox disconnects automatically when the player
 	leaves, so — unlike the per-character Humanoid connections above — these
@@ -211,7 +212,7 @@ local function attachPlayer(player: Player)
 		onCharacterAdded(player, player.Character)
 	end
 
-	if RunService:IsStudio() then
+	if DeveloperAccess.canUseTestCommands(player) then
 		player.Chatted:Connect(function(message: string)
 			onChatted(player, message)
 		end)
