@@ -17,10 +17,14 @@
 	for as long as it likes by never sending "end". It cannot widen the arc,
 	guard from the rear, or punch while the server has it engaged.
 
-	A guard lasts until the client says it is over, or until a lifecycle event
-	ends it. There is deliberately no maximum duration: holding Q is meant to
-	keep guarding for as long as the player holds it, and any ceiling that
-	bounded a modified client would cut an honest one off mid-guard as well.
+	A guard lasts until the client says it is over, until a lifecycle event ends
+	it, or until it runs its owner out of stamina. There is still deliberately no
+	maximum *duration*: holding Q is meant to keep guarding for as long as the
+	player holds it, and any ceiling on the clock would cut an honest player off
+	mid-guard as readily as a modified one. Stamina is not a ceiling on the clock
+	— it is a resource the guard spends, the same one sprinting and punching
+	spend, and it is the cost this service was previously unable to charge. See
+	StaminaService, which owns it; nothing about the phase machine below moved.
 
 	Every transition that arrives with a legal shape is applied. There is no
 	rate limiter on the phase, deliberately: dropping a valid transition would
@@ -40,6 +44,8 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
 local Net = require(Shared.Net)
 local ParryState = require(Shared.Combat.ParryState)
+
+local StaminaService = require(script.Parent.StaminaService)
 
 local states: { [Player]: ParryState.ParryState } = {}
 
@@ -76,7 +82,52 @@ local function onParryStateRequest(player: Player, transition: any)
 	-- not satisfy Transition; an annotated local takes the `any` directly,
 	-- which is what isTransition above has already vouched for.
 	local requested: ParryState.Transition = transition
-	states[player] = ParryState.apply(stateOf(player), requested)
+
+	-- The one exception to "every legal transition is applied", and it is a
+	-- deliberate one: a guard costs stamina to hold, so it cannot be started
+	-- without any. Refusing here rather than ending it a tick later is what
+	-- stops a client sending "begin" and "hold" back to back from being
+	-- protected for the length of one tick on an empty pool.
+	--
+	-- Dropping a transition is exactly the shape of bug the "never drop a valid
+	-- transition" section in docs/decisions.md is about, so it comes with the
+	-- matching mitigation: this rule is deterministic, the client holds the same
+	-- stamina value and evaluates the same shared predicate before it ever asks,
+	-- and if the two do disagree the client ends its own guard as soon as the
+	-- next StaminaChanged lands. See docs/decisions.md.
+	if requested == "begin" and not StaminaService.canBlock(player) then
+		return
+	end
+
+	local state = ParryState.apply(stateOf(player), requested)
+	states[player] = state
+
+	-- The phase stays here; StaminaService only ever hears the one bit it needs
+	-- to know whether to charge the guard drain.
+	StaminaService.setBlocking(player, ParryState.isEngaged(state))
+end
+
+--[[
+	Ends whatever guard `player` is holding, without them having asked.
+
+	The only caller is the depletion listener registered in Start below: a guard
+	that runs its owner out of stamina ends, because the alternative is a
+	protection that costs nothing to keep. It applies the same "end" transition
+	the remote handler would, so there is one way out of the state machine rather
+	than a second, force-only path through it.
+
+	The client is not told directly. It learns from the StaminaChanged that
+	carries the pool reaching zero and drops its own guard on that, which is the
+	same value this decision was made from — so no extra remote exists for a
+	modified client to ignore.
+]]
+local function endGuard(player: Player)
+	if not ParryState.isEngaged(stateOf(player)) then
+		return
+	end
+
+	states[player] = ParryState.apply(stateOf(player), "end")
+	StaminaService.setBlocking(player, false)
 end
 
 --[[
@@ -150,10 +201,19 @@ end
 local function attachPlayer(player: Player)
 	player.CharacterRemoving:Connect(function()
 		states[player] = nil
+		-- StaminaService clears this on the same event as well. Telling it here
+		-- too keeps the rule "the guard drain is on exactly while this service
+		-- says the player is engaged" true regardless of which of the two
+		-- handlers Roblox happens to run first.
+		StaminaService.setBlocking(player, false)
 	end)
 end
 
 function ParryService.Start()
+	-- A guard that empties its owner's pool ends. Subscribed here rather than
+	-- polled: StaminaService raises this exactly on the transition to zero.
+	StaminaService.onDepleted(endGuard)
+
 	Players.PlayerAdded:Connect(attachPlayer)
 	Players.PlayerRemoving:Connect(function(player: Player)
 		-- Without this, every player who has ever parried stays in the table for

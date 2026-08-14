@@ -9,8 +9,8 @@ developers, one UI designer, one builder. Written in Luau, synced into Roblox
 Studio with Rojo. The filesystem is the source of truth for code; the Roblox
 place file is the source of truth for the map and UI layout.
 
-**Gameplay has started.** Health, punch combat, parrying and sprinting exist and
-work. Everything else — stamina, weapons, inventory, quests, NPCs, progression,
+**Gameplay has started.** Health, punch combat, parrying, sprinting and stamina
+exist and work. Everything else — weapons, inventory, quests, NPCs, progression,
 currency, data persistence, the map — does not. Do not describe this project as
 having no gameplay, and do not rebuild what is listed below.
 
@@ -21,7 +21,8 @@ having no gameplay, and do not rebuild what is listed below.
 | Health, death, respawn | `HealthService/` | `HealthBarController/` | `HealthState`, `HealthDisplay` |
 | Punch combat (left click) | `CombatService` | `PunchController` | `Shared/Combat/PunchRules` |
 | Parry (hold Q) | `ParryService` | `ParryController` | `Shared/Combat/ParryState` |
-| Sprint (hold Shift) | — client-only | `RunningController/` | `SprintState` |
+| Sprint (hold Shift) | intent only, via `StaminaService` | `RunningController/` | `SprintState` |
+| Stamina | `StaminaService` | `StaminaController`, `StaminaBarController` | `Shared/Stamina/StaminaState` |
 | Boot handshake | `SessionService` | `SessionController` | — |
 
 Combat specifics that are easy to break:
@@ -41,6 +42,23 @@ Combat specifics that are easy to break:
 - `RunningController` is the **only** writer of `Humanoid.WalkSpeed`.
   `ParryController` reports intent to it; it must never set the property
   itself.
+- Stamina is server-owned and server-written. Nothing sends a stamina value
+  towards the server; `SprintStateRequest` carries one boolean — whether the
+  player *is* sprinting, not whether Shift is down — and nothing else. There is
+  exactly **one** `Heartbeat` loop for stamina, in `StaminaService`, and
+  `StaminaChanged` fires on meaningful change, never per frame.
+- The empty-pool rules for punching and guarding are enforced server-side:
+  `ParryService` refuses a `begin` and ends a live guard, `CombatService`
+  multiplies the punch damage. The matching client checks are presentation only
+  — do not move a decision into them.
+- The empty-pool rule for **sprinting** is the exception, because sprinting is a
+  `WalkSpeed` and the server does not write that property. `RunningController`
+  applies the shared `StaminaState.sprintLocked` to the pool the server sent.
+  The server still owns recovery: it regenerates a player it cannot see
+  sprinting and charges one it can, so ignoring the lockout costs a modified
+  client its refill. The lockout engages at zero and releases at
+  `Config.SprintRecoveryStaminaFraction` — two thresholds, deliberately, so an
+  exhausted player does not judder between speeds. See `docs/decisions.md`.
 - Every tunable number lives in `Shared/Config.luau`.
 
 ## Source tree
@@ -50,6 +68,7 @@ src/shared/     ReplicatedStorage.Shared   types, config, utilities, remote decl
   Types.luau            types crossing the client/server boundary
   Config.luau           every tunable number in the game, frozen
   Combat/PunchRules     pure punch arithmetic — reach, cone, cooldown, lag
+  Stamina/StaminaState  pure stamina arithmetic — clamping, empty/full, costs
   Net/                  remote registry; Remotes.luau declares every remote
   Runtime/Bootstrap     Init()/Start() lifecycle runner
   Util/Logger           scoped logging — use this, not bare print
