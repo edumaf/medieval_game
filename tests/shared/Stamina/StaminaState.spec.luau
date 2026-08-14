@@ -154,8 +154,9 @@ describe("Shared.Stamina.StaminaState", function()
 	describe("canBlock", function()
 		it("allows a guard while there is stamina left", function()
 			expect(StaminaState.canBlock(StaminaState.new(MAX_STAMINA))).toBe(true)
-			expect(StaminaState.canBlock(StaminaState.consume(StaminaState.new(MAX_STAMINA), 99.5)))
-				.toBe(true)
+			expect(StaminaState.canBlock(StaminaState.consume(StaminaState.new(MAX_STAMINA), 99.5))).toBe(
+				true
+			)
 		end)
 
 		it("refuses a guard on an empty pool", function()
@@ -176,8 +177,9 @@ describe("Shared.Stamina.StaminaState", function()
 		local ZERO_MULTIPLIER = Config.ZeroStaminaPunchDamageMultiplier
 
 		it("leaves a punch alone while there is stamina left", function()
-			expect(StaminaState.damageMultiplier(StaminaState.new(MAX_STAMINA), ZERO_MULTIPLIER))
-				.toBe(1)
+			expect(StaminaState.damageMultiplier(StaminaState.new(MAX_STAMINA), ZERO_MULTIPLIER)).toBe(
+				1
+			)
 		end)
 
 		it("leaves a punch alone with barely any stamina left", function()
@@ -242,23 +244,26 @@ describe("Shared.Stamina.StaminaState", function()
 		it("never re-sends a value that has not moved", function()
 			-- This is what makes an idle player, and a player pinned at zero,
 			-- cost nothing at all.
-			expect(StaminaState.shouldReplicate(MAX_STAMINA, MAX_STAMINA, MAX_STAMINA, STEP))
-				.toBe(false)
+			expect(StaminaState.shouldReplicate(MAX_STAMINA, MAX_STAMINA, MAX_STAMINA, STEP)).toBe(
+				false
+			)
 			expect(StaminaState.shouldReplicate(0, 0, MAX_STAMINA, STEP)).toBe(false)
 		end)
 
 		it("holds back a change smaller than one step", function()
 			local justUnderAStep = MAX_STAMINA - (MAX_STAMINA * STEP) / 2
 
-			expect(StaminaState.shouldReplicate(MAX_STAMINA, justUnderAStep, MAX_STAMINA, STEP))
-				.toBe(false)
+			expect(StaminaState.shouldReplicate(MAX_STAMINA, justUnderAStep, MAX_STAMINA, STEP)).toBe(
+				false
+			)
 		end)
 
 		it("sends a change of a whole step, in either direction", function()
 			local step = MAX_STAMINA * STEP
 
-			expect(StaminaState.shouldReplicate(MAX_STAMINA, MAX_STAMINA - step, MAX_STAMINA, STEP))
-				.toBe(true)
+			expect(StaminaState.shouldReplicate(MAX_STAMINA, MAX_STAMINA - step, MAX_STAMINA, STEP)).toBe(
+				true
+			)
 			expect(StaminaState.shouldReplicate(50, 50 + step, MAX_STAMINA, STEP)).toBe(true)
 		end)
 
@@ -270,9 +275,9 @@ describe("Shared.Stamina.StaminaState", function()
 
 		it("always sends the moment the pool fills, however small the last regen", function()
 			-- The bar hides at exactly full, so the same applies at the top.
-			expect(
-				StaminaState.shouldReplicate(MAX_STAMINA - 0.01, MAX_STAMINA, MAX_STAMINA, STEP)
-			).toBe(true)
+			expect(StaminaState.shouldReplicate(MAX_STAMINA - 0.01, MAX_STAMINA, MAX_STAMINA, STEP)).toBe(
+				true
+			)
 		end)
 	end)
 end)
