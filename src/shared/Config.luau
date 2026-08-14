@@ -26,11 +26,15 @@ local Config = {
 	LogLevel = "info" :: LogLevel,
 
 	--[[
-		Humanoid.WalkSpeed while walking normally and while sprinting (Left
-		Shift held). See src/client/Controllers/RunningController.
+		Humanoid.WalkSpeed while walking normally, while sprinting (Left Shift
+		held) and while parrying (Q held). See
+		src/client/Controllers/RunningController, which is the only thing that
+		writes WalkSpeed — parry outranks sprint, so holding both gives
+		ParryWalkSpeed.
 	]]
 	NormalWalkSpeed = 16,
 	SprintWalkSpeed = 24,
+	ParryWalkSpeed = 8,
 
 	--[[
 		Health (and max health) every character starts at and is restored to on
@@ -127,6 +131,47 @@ local Config = {
 	-- renames or drops the marker stops punches landing, and the two values
 	-- have to be changed together.
 	PunchHitMarkerName = "Hit",
+
+	--[[
+		Parrying. Authority lives in src/server/Services/ParryService, which
+		CombatService consults before it deals damage; input and animation in
+		src/client/Controllers/ParryController; the shared phases and the
+		direction test in src/shared/Combat/ParryState.
+
+		Shared for the same reason the punch numbers are: a player can measure
+		the guard's arc by being hit from behind once, and knowing the number
+		does not let a modified client widen it. The server recomputes the
+		direction from its own view of where both characters are standing.
+	]]
+
+	-- How far in front of the DEFENDER an attack must come from for a held
+	-- guard to stop it, as a dot product of the defender's look vector with
+	-- the direction the attacker is in: 1 is dead ahead, 0 is directly beside,
+	-- -1 is directly behind.
+	--
+	-- 0 is the forward hemisphere — front, front-left and front-right are
+	-- covered, the three rear directions are not. The comparison is >=,
+	-- matching PunchRules.isInReach, so an attack from exactly beside the
+	-- defender counts as covered.
+	--
+	-- Raising this narrows the guard towards a frontal cone (0.5 would make it
+	-- the same 120 degrees as the punch); it must never go below 0, which
+	-- would start protecting the defender's back.
+	ParryMinFacingDot = 0,
+
+	-- rbxassetid:// of the parry animation. Empty string means "no animation
+	-- uploaded yet" — the parry still works, it just plays nothing and reaches
+	-- the guard on the key press instead of on the marker.
+	ParryAnimationId = "rbxassetid://82891306050913",
+
+	-- Name of the animation event marker on that animation, placed on the
+	-- frame the guard is fully raised. ParryController enters the protected
+	-- state when the track reaches it and freezes the track there, so this is
+	-- the parry's timing in exactly the way PunchHitMarkerName is the punch's.
+	-- A re-export that renames or drops the marker leaves the parry winding up
+	-- forever — slowed and unable to punch, but never protected — and nothing
+	-- errors. The two values have to be changed together.
+	ParryHoldMarkerName = "Hold",
 }
 
 return table.freeze(Config)

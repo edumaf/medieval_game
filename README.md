@@ -3,8 +3,9 @@
 A collaborative Roblox game built by a small team, with code in Git and the
 world in Roblox Studio.
 
-**The game is playable, barely.** You can run, punch someone for 25 damage, and
-die. That is the whole of it — see [What exists so far](#what-exists-so-far).
+**The game is playable, barely.** You can run, punch someone for 25 damage,
+parry a punch coming at your front, and die. That is the whole of it — see
+[What exists so far](#what-exists-so-far).
 Everything else here is the foundation those systems were built on: the
 architecture, the toolchain, the tests, the CI, and the conventions. This README
 is the onboarding guide — if you follow it top to bottom you will end up with a
@@ -76,6 +77,7 @@ Enough to fight someone. Not enough to call it a game yet.
 | --- | --- |
 | **Left click** | Throw a punch — 25 damage, ~4.5 studs, 120° cone in front of you |
 | **Left Shift** (hold) | Sprint (16 → 24 walkspeed) |
+| **Q** (hold) | Parry — blocks punches from your front half, slows you to 8 walkspeed |
 | `/damage <n>`, `/heal <n>` | Developer-only test commands (see [Testing](#testing)) |
 
 ### Systems
@@ -84,6 +86,7 @@ Enough to fight someone. Not enough to call it a game yet.
 | --- | --- | --- |
 | **Health** | `HealthService` + `HealthBarController` | 100 HP, server-authoritative, on-screen bar, death and respawn |
 | **Punch combat** | `CombatService` + `PunchController` + `PunchRules` | Left click, animated swing, server decides who was hit |
+| **Parry** | `ParryService` + `ParryController` + `ParryState` | Hold Q, animated guard, server decides whether it stopped the punch |
 | **Sprinting** | `RunningController` + `SprintState` | Hold Shift, client-side (see `docs/decisions.md` for why) |
 | **Session** | `SessionService` + `SessionController` | Boot handshake, detects a client on a stale build |
 
@@ -102,13 +105,21 @@ of where everyone is standing.
   attacker's screen than it really is on the server, which used to make chase
   punches miss. `PunchRules.perceivedDistance` gives some of that back, capped
   so it cannot become a ranged attack.
+- **The parry has the same timing story, and the same silent failure.** Holding
+  Q winds up a guard; the `Hold` marker on the parry animation is what actually
+  makes you protected, and the track is frozen there while you hold the key.
+  A missing or renamed marker leaves you slowed and unable to punch but never
+  protected, with nothing in Output to say so.
+- **Parry is directional.** It stops punches from your front half only. Getting
+  hit from behind while guarding is working as intended.
 - **All the numbers are in `src/shared/Config.luau`** — damage, reach, cooldown,
-  cone angle, sprint speed, lag allowance. Tune there, not in Studio.
+  cone angle, sprint speed, parry speed, parry arc, lag allowance. Tune there,
+  not in Studio.
 
 ### Not built yet
 
-Stamina, blocking/parrying, weapons, inventory, quests, NPCs, enemies,
-progression, currency, player data persistence, and the map itself.
+Stamina, weapons, inventory, quests, NPCs, enemies, progression, currency,
+player data persistence, and the map itself.
 
 ## Development philosophy
 

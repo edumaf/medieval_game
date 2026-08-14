@@ -9,10 +9,10 @@ developers, one UI designer, one builder. Written in Luau, synced into Roblox
 Studio with Rojo. The filesystem is the source of truth for code; the Roblox
 place file is the source of truth for the map and UI layout.
 
-**Gameplay has started.** Health, punch combat and sprinting exist and work.
-Everything else — stamina, blocking, weapons, inventory, quests, NPCs,
-progression, currency, data persistence, the map — does not. Do not describe
-this project as having no gameplay, and do not rebuild what is listed below.
+**Gameplay has started.** Health, punch combat, parrying and sprinting exist and
+work. Everything else — stamina, weapons, inventory, quests, NPCs, progression,
+currency, data persistence, the map — does not. Do not describe this project as
+having no gameplay, and do not rebuild what is listed below.
 
 ## What is built
 
@@ -20,6 +20,7 @@ this project as having no gameplay, and do not rebuild what is listed below.
 | --- | --- | --- | --- |
 | Health, death, respawn | `HealthService/` | `HealthBarController/` | `HealthState`, `HealthDisplay` |
 | Punch combat (left click) | `CombatService` | `PunchController` | `Shared/Combat/PunchRules` |
+| Parry (hold Q) | `ParryService` | `ParryController` | `Shared/Combat/ParryState` |
 | Sprint (hold Shift) | — client-only | `RunningController/` | `SprintState` |
 | Boot handshake | `SessionService` | `SessionController` | — |
 
@@ -31,6 +32,15 @@ Combat specifics that are easy to break:
   (`Config.PunchHitMarkerName`), not a timer. See `docs/decisions.md`.
 - `PunchRules.perceivedDistance` compensates for a fleeing target's replicated
   position lagging behind. It is capped so it cannot become a ranged attack.
+- Parry has three phases (`idle`/`attempting`/`active`) and protection starts
+  only at the animation's `Hold` marker (`Config.ParryHoldMarkerName`). The
+  slowdown and the punch lockout start earlier, at the key press. Do not
+  collapse the phases into a boolean.
+- The parry arc is defender-relative and reuses the punch's dot-product
+  convention — do not introduce a second definition of "in front".
+- `RunningController` is the **only** writer of `Humanoid.WalkSpeed`.
+  `ParryController` reports intent to it; it must never set the property
+  itself.
 - Every tunable number lives in `Shared/Config.luau`.
 
 ## Source tree

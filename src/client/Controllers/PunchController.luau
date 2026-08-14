@@ -30,6 +30,8 @@ local Logger = require(Shared.Util.Logger)
 local Net = require(Shared.Net)
 local PunchRules = require(Shared.Combat.PunchRules)
 
+local ParryController = require(script.Parent.ParryController)
+
 local log = Logger.forScope("PunchController")
 
 local PunchController = {}
@@ -123,6 +125,14 @@ end
 local function onInputBegan(input: InputObject, gameProcessedEvent: boolean)
 	-- gameProcessedEvent covers clicking a button or typing in chat.
 	if gameProcessedEvent or input.UserInputType ~= Enum.UserInputType.MouseButton1 then
+		return
+	end
+
+	-- No punching out of a guard. CombatService refuses the request too, and
+	-- that is the check that decides; this one only stops a swing playing for a
+	-- punch that was never going to land. Checked before the cooldown so a
+	-- refused click does not cost the player their next real punch.
+	if ParryController.isEngaged() then
 		return
 	end
 

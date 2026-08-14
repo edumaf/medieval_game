@@ -1,6 +1,11 @@
 --!strict
 --[[
-	RunningController — sprint while Left Shift is held.
+	RunningController — sprint while Left Shift is held, and the one writer of
+	Humanoid.WalkSpeed.
+
+	ParryController reports its phase here through setParryActive rather than
+	setting WalkSpeed itself, so the two systems cannot fight over the property.
+	See SprintState for why both intents live in one state.
 
 	Client-only, no remote involved: Humanoid.WalkSpeed is a replicated
 	property and a player's own character is client-network-owned by default,
@@ -41,8 +46,28 @@ local function applyWalkSpeed()
 	if humanoid == nil then
 		return
 	end
-	humanoid.WalkSpeed =
-		SprintState.walkSpeed(state, Config.NormalWalkSpeed, Config.SprintWalkSpeed)
+	humanoid.WalkSpeed = SprintState.walkSpeed(
+		state,
+		Config.NormalWalkSpeed,
+		Config.SprintWalkSpeed,
+		Config.ParryWalkSpeed
+	)
+end
+
+--[[
+	Parry intent, handed over by ParryController on every phase change.
+
+	This controller stays the only writer of WalkSpeed. The speed is recomputed
+	from both intents on every change rather than saved and restored, so a parry
+	that ends while Shift is still held drops straight back to the sprint speed,
+	and there is no modifier left behind to go stale.
+
+	Safe to call before Start() has found a Humanoid: the request is remembered
+	in `state` and applied the moment one appears.
+]]
+function RunningController.setParryActive(active: boolean)
+	state = if active then SprintState.withParryBegan(state) else SprintState.withParryEnded(state)
+	applyWalkSpeed()
 end
 
 --[[
