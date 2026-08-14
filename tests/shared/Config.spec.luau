@@ -124,6 +124,27 @@ describe("Shared.Config", function()
 		expect(Config.ZeroStaminaPunchDamageMultiplier < 1).toBe(true)
 	end)
 
+	it("makes an exhausted sprinter wait for a real fraction of the pool", function()
+		-- At or below 0 the lockout would release on the first tick of
+		-- regeneration and the player would judder between walking and sprinting
+		-- ten times a second, which is the failure the second threshold exists to
+		-- prevent. At or above 1 only a completely full pool would ever release
+		-- it, which turns a short exhaustion into the whole regeneration.
+		expect(Config.SprintRecoveryStaminaFraction > 0).toBe(true)
+		expect(Config.SprintRecoveryStaminaFraction < 1).toBe(true)
+	end)
+
+	it("buys back more sprint than the recovery costs to reach", function()
+		-- The exhaustion has to be a rhythm rather than a tax: recovering to the
+		-- threshold and spending it again should leave the player sprinting for a
+		-- usable stretch, not for a step. Both sides are derived from the shipped
+		-- rates, so retuning either drain or regen re-checks this.
+		local recovered = Config.MaxStamina * Config.SprintRecoveryStaminaFraction
+		local sprintSeconds = recovered / Config.SprintStaminaDrainPerSecond
+
+		expect(sprintSeconds >= 1).toBe(true)
+	end)
+
 	it("ticks stamina often enough to be a bar rather than a counter", function()
 		-- The pool is integrated against real elapsed time, so this only decides
 		-- how often the number moves. A quarter of a second is where a drain

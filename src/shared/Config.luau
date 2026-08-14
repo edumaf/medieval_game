@@ -190,6 +190,23 @@ local Config = {
 	-- always derived and the number 7.5 appears nowhere.
 	ZeroStaminaPunchDamageMultiplier = 0.3,
 
+	-- How full the pool has to be, as a fraction of MaxStamina, before a player
+	-- who has run themselves empty may sprint again.
+	--
+	-- This is the second threshold of a deliberate hysteresis, and it is what
+	-- makes exhaustion a state rather than a stutter. A single threshold at zero
+	-- would let the first tick of regeneration buy a tick of sprinting: at the
+	-- shipped rates the pool would gain 1 and immediately spend 1.2, ten times a
+	-- second, and the player would judder between 16 and 24 for as long as they
+	-- held the key.
+	--
+	-- At 0.25 an exhausted player walks for two and a half seconds and gets
+	-- about two seconds of sprint back. Raising it lengthens the recovery;
+	-- lowering it towards zero brings the judder back. The lockout is released
+	-- by this fraction alone and never by the key, so releasing Shift and
+	-- pressing it again cannot shorten it -- see StaminaState.sprintLocked.
+	SprintRecoveryStaminaFraction = 0.25,
+
 	-- How often StaminaService's single Heartbeat loop actually steps every
 	-- player's pool. The step is integrated against real elapsed time, so this
 	-- changes how often the pool moves, never how fast it drains.

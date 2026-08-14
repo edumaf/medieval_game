@@ -43,13 +43,22 @@ Combat specifics that are easy to break:
   `ParryController` reports intent to it; it must never set the property
   itself.
 - Stamina is server-owned and server-written. Nothing sends a stamina value
-  towards the server; `SprintStateRequest` carries one boolean and nothing else.
-  There is exactly **one** `Heartbeat` loop for stamina, in `StaminaService`, and
+  towards the server; `SprintStateRequest` carries one boolean — whether the
+  player *is* sprinting, not whether Shift is down — and nothing else. There is
+  exactly **one** `Heartbeat` loop for stamina, in `StaminaService`, and
   `StaminaChanged` fires on meaningful change, never per frame.
-- The empty-pool rules are enforced server-side: `ParryService` refuses a
-  `begin` and ends a live guard, `CombatService` multiplies the punch damage.
-  The matching client checks are presentation only — do not move a decision into
-  them.
+- The empty-pool rules for punching and guarding are enforced server-side:
+  `ParryService` refuses a `begin` and ends a live guard, `CombatService`
+  multiplies the punch damage. The matching client checks are presentation only
+  — do not move a decision into them.
+- The empty-pool rule for **sprinting** is the exception, because sprinting is a
+  `WalkSpeed` and the server does not write that property. `RunningController`
+  applies the shared `StaminaState.sprintLocked` to the pool the server sent.
+  The server still owns recovery: it regenerates a player it cannot see
+  sprinting and charges one it can, so ignoring the lockout costs a modified
+  client its refill. The lockout engages at zero and releases at
+  `Config.SprintRecoveryStaminaFraction` — two thresholds, deliberately, so an
+  exhausted player does not judder between speeds. See `docs/decisions.md`.
 - Every tunable number lives in `Shared/Config.luau`.
 
 ## Source tree

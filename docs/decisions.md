@@ -908,3 +908,78 @@ punch that misses, or that is parried, costs stamina for the same reason it
 costs a cooldown: it was still a swing. The reduced damage is computed as
 `Config.PunchDamage * multiplier` at the single existing damage site, so 7.5 is
 never written down and retuning the punch retunes the exhausted one with it.
+
+## An empty pool takes the sprint away, with two thresholds and one latch
+
+Stamina originally charged for sprinting without ever stopping it. Running the
+pool to zero drained nothing further and changed nothing else: the player kept
+running at `Config.SprintWalkSpeed` on an empty bar. That was the shipped
+behaviour, not an accident — the manual sprint steps in `docs/testing.md` said
+so — and it is what this change closes.
+
+The rule is `StaminaState.sprintLocked`, beside `canBlock` and shared for the
+same reason: one definition, evaluated on both sides of the wire against the
+same number.
+
+### Why it is a latch rather than a predicate
+
+`canBlock` can be `not isEmpty` because a guard needs a fresh key press. A
+sprint does not — the key is already held — so the same rule applied to a sprint
+would release on the first tick of regeneration. At the shipped rates that is
+`+1` stamina followed immediately by `-1.2`, ten times a second, and the player
+would judder between 16 and 24 for as long as they held Shift.
+
+So the lockout engages at zero and releases at
+`Config.SprintRecoveryStaminaFraction` (0.25). The two thresholds are what makes
+exhaustion a state you recover from rather than a boundary you oscillate on. It
+is deliberately *not* a general "you cannot sprint below 25%" rule: a player who
+has never been exhausted may sprint on their last point of stamina. The fraction
+gates recovery from empty, nothing else — which is why the previous answer is an
+argument, exactly as `shouldReplicate` takes `lastSent`.
+
+The key is not an input to it. Releasing Shift and pressing it again at zero
+does not clear the lockout, and holding Shift through the whole exhaustion is
+enough to resume the moment it releases.
+
+### Where it is applied, and why that is not the client deciding
+
+The lockout lives in `SprintState` next to the sprint and parry intents, for the
+reason that state exists at all: everything that changes `WalkSpeed` has to be
+recomputed from one place, or the inputs strand each other. `RunningController`
+evaluates the shared rule against the pool `StaminaController` received and
+hands the answer in.
+
+That is a client applying a server-owned number through a shared predicate, not
+a client deciding when a player is exhausted — the same arrangement as
+`ParryController` checking `canBlock` before it presses anything. The reason it
+is not additionally snapped back by the server is the one the sprinting section
+above has been giving since before stamina existed: `WalkSpeed` is client-owned
+here, and making it server-authoritative is a movement change that deserves its
+own branch with nothing else in the diff.
+
+What the server does enforce is the half that decides recovery, and it needs no
+new code to do it: `StaminaService` regenerates a player it cannot see
+sprinting, and charges one it can. A client that keeps sprinting at zero keeps
+paying a drain against an empty pool and never refills. **Ignoring the lockout
+therefore buys a modified client nothing it did not already have, and costs it
+the recovery.**
+
+### The one thing that had to change on the wire
+
+`SprintStateRequest` now carries whether the player *is* sprinting rather than
+whether Shift is down. It is still one boolean, still sent only on change, and
+still carries no stamina value.
+
+The distinction is load-bearing rather than cosmetic. `StaminaService` charges
+the drain when the client declares the intent **or** the server can see a
+sprinting `WalkSpeed`, so an exhausted player who kept reporting a held key
+would be billed for a sprint they are not doing, would sit pinned at zero, and
+would never recover — the lockout would be permanent for exactly as long as the
+player held the key. Reporting the effective state is what lets the regeneration
+branch be reached under a held key, and it costs the same two messages per
+state change that a held key already cost.
+
+Parry is deliberately not folded into that boolean. A guarding player is still
+asking to sprint, and the server bills a guard from its own parry phase, so
+including it would send a pair of messages per guard to change a drain nothing
+reads.

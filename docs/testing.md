@@ -584,77 +584,91 @@ gameplay steps first and come back to the UI ones.
    holding the key is not sprinting.
 5. Hold Shift while walking face-first into a wall. Confirm nothing drains, for
    the same reason.
-6. Sprint until the pool is empty, and keep holding Shift. Confirm the bar sits
-   at zero, does not flicker, and that you are **still sprinting** — running out
-   of stamina does not currently slow you down.
-7. Confirm sprinting itself is unchanged throughout: 24 while held, 16 on
-   release, 8 while parrying.
-8. Sprint, die mid-sprint (Esc → Reset Character), and respawn. Confirm the new
-   character starts on a full bar (so, a hidden one) and that continuing to hold
-   Shift drains it again.
+6. Sprint until the pool is empty, and keep holding Shift. Confirm you **drop to
+   the walking speed** at the moment the bar reaches zero, and stay there.
+7. Keep holding Shift and watch the bar refill. Confirm it refills steadily
+   while you walk — the pool must recover under a held key, not stall at zero —
+   and that you do **not** flicker between 16 and 24 as it climbs.
+8. Still holding Shift, confirm you start sprinting again on your own at about a
+   quarter of the bar (`Config.SprintRecoveryStaminaFraction`), without touching
+   the key.
+9. Sprint to empty again, then release Shift and immediately press it again,
+   repeatedly. Confirm this does **not** get you sprinting — the lockout is
+   released by the pool, never by the key.
+10. Empty the pool by punching rather than sprinting (see the Punch steps), then
+    hold Shift. Confirm you cannot sprint until the bar has recovered to the
+    same quarter — exhaustion is exhaustion, whatever spent it.
+11. Confirm sprinting itself is unchanged otherwise: 24 while held with stamina,
+    16 on release, 8 while parrying, and normal walking never affected by any of
+    this.
+12. Sprint, die mid-sprint (Esc → Reset Character), and respawn. Confirm the new
+    character starts on a full bar (so, a hidden one), that continuing to hold
+    Shift drains it again, and that a death *while exhausted* leaves the new
+    character able to sprint immediately.
 
 **Punch**
 
-9. Punch once from full. Confirm the bar appears and drops by one punch's worth,
+13. Punch once from full. Confirm the bar appears and drops by one punch's worth,
    then refills.
-10. Punch a target from full stamina. Confirm they lose exactly 25 and Output
+14. Punch a target from full stamina. Confirm they lose exactly 25 and Output
     logs `A punched B for 25 -> 75`.
-11. Punch at nothing, and punch someone who is guarding. Confirm stamina is
+15. Punch at nothing, and punch someone who is guarding. Confirm stamina is
     spent both times — a swing costs whether or not it lands.
-12. Drain the pool to zero with sprinting, then punch. Confirm the target loses
+16. Drain the pool to zero with sprinting, then punch. Confirm the target loses
     exactly **7.5** and Output logs `for 7.5`. If you have retuned
     `PunchDamage` or `ZeroStaminaPunchDamageMultiplier`, confirm the logged
     number is the product of the two.
-13. Punch repeatedly from full without sprinting until the pool empties.
+17. Punch repeatedly from full without sprinting until the pool empties.
     Confirm the punch that *empties* the bar still deals 25, and the next one
     deals 7.5. That ordering is deliberate — see `docs/decisions.md`.
-14. Confirm the punch is otherwise unchanged at zero stamina: same cooldown,
+18. Confirm the punch is otherwise unchanged at zero stamina: same cooldown,
     same swing animation, same reach, and still stopped completely by a guard.
-15. Watch the Network graph (F9 → Network, or the Studio microprofiler) while
+19. Watch the Network graph (F9 → Network, or the Studio microprofiler) while
     holding Shift for ten seconds. Confirm stamina traffic is a handful of
     messages a second, not one per frame.
 
 **Parry / block**
 
-16. Hold Q from full. Confirm the bar appears and drains, more slowly than
+20. Hold Q from full. Confirm the bar appears and drains, more slowly than
     sprinting does.
-17. Release Q. Confirm the drain stops and the pool refills.
-18. Hold Q and Shift together. Confirm only **one** drain is charged, at the
+21. Release Q. Confirm the drain stops and the pool refills.
+22. Hold Q and Shift together. Confirm only **one** drain is charged, at the
     parry rate, matching the fact that you are walking at 8.
-19. Hold Q until the pool empties. Confirm the guard **ends by itself**: the
+23. Hold Q until the pool empties. Confirm the guard **ends by itself**: the
     pose drops, and a punch from the front now lands for full damage.
-20. Still at zero, press Q again. Confirm no guard starts — no animation, no
+24. Still at zero, press Q again. Confirm no guard starts — no animation, no
     slowdown, and a punch from the front still lands.
-21. Let stamina regenerate a little, then press Q. Confirm a normal guard starts
+25. Let stamina regenerate a little, then press Q. Confirm a normal guard starts
     again, with its usual wind-up.
-22. Have the other player punch you during step 19, in the moment the pool runs
+26. Have the other player punch you during step 23, in the moment the pool runs
     out. Confirm you take the damage — the guard genuinely ended and did not
     keep protecting you invisibly.
 
 **UI**
 
-23. Confirm the bar is hidden on join, before anything has been spent.
-24. Confirm it appears the moment stamina drops below full and stays visible for
+27. Confirm the bar is hidden on join, before anything has been spent.
+28. Confirm it appears the moment stamina drops below full and stays visible for
     the whole regeneration, not just while the key is held.
-25. Confirm it disappears again once the pool is full.
-26. Drain, die, and respawn. Confirm the bar is present, hidden and working for
+29. Confirm it disappears again once the pool is full.
+30. Drain, die, and respawn. Confirm the bar is present, hidden and working for
     the new character — a bar that stops updating after a death means the
     ScreenGui has `ResetOnSpawn` on, or the controller lost its references.
-27. Confirm the fill moves smoothly rather than in visible steps, and that it
+31. Confirm the fill moves smoothly rather than in visible steps, and that it
     keeps up with a punch landing.
 
 **Multiplayer and authority**
 
-28. With both players sprinting, confirm each bar drains independently and
+32. With both players sprinting, confirm each bar drains independently and
     neither moves when the other player acts.
-29. Have one player empty their pool. Confirm the other player's punches still
-    deal 25 and their guard still works.
-30. Have one player leave and rejoin. Confirm they come back on a full pool and
+33. Have one player empty their pool. Confirm the other player's punches still
+    deal 25, their guard still works, and — with both holding Shift — that only
+    the exhausted one drops to walking pace while the other keeps sprinting.
+34. Have one player leave and rejoin. Confirm they come back on a full pool and
     that Output shows no errors about a missing record.
-31. In the client console, set any local stamina value you can find and confirm
+35. In the client console, set any local stamina value you can find and confirm
     it changes nothing that matters: punches keep dealing what the server says,
     and a guard started on a locally-faked pool is refused by the server.
 
-32. Check Output for errors or warnings throughout. Malformed sprint payloads
+36. Check Output for errors or warnings throughout. Malformed sprint payloads
     are dropped silently by design, so nothing should appear there during honest
     play at all.

@@ -45,12 +45,16 @@ local Definitions: { [string]: RemoteClass } = {
 	-- forge except the timing, which CombatService rate-limits.
 	PunchRequest = "RemoteEvent",
 
-	-- Client reports whether the player is holding the sprint key, as a single
-	-- boolean, on the frame it changes and never otherwise. Nothing else is
-	-- sent — no speed, no position, and above all no stamina number — because
+	-- Client reports whether the player is sprinting, as a single boolean, on
+	-- the frame it changes and never otherwise. Nothing else is sent — no
+	-- speed, no position, and above all no stamina number — because
 	-- StaminaService drains the pool from its own clock and only needs to know
-	-- which state the player is asking to be in. Validated in StaminaService,
-	-- which accepts a boolean and nothing else.
+	-- which state the player is in. Validated in StaminaService, which accepts
+	-- a boolean and nothing else.
+	--
+	-- "Sprinting" rather than "holding the key": a player whose pool has run
+	-- empty is not sprinting even with Shift down, and reports false, which is
+	-- what lets the server regenerate them. See SprintState.isSprinting.
 	--
 	-- This is the remote docs/decisions.md's sprinting section has been pointing
 	-- at: the first system that cares whether a player is really sprinting has

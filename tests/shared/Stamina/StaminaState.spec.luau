@@ -173,6 +173,85 @@ describe("Shared.Stamina.StaminaState", function()
 		end)
 	end)
 
+	describe("sprintLocked", function()
+		local RECOVERY = Config.SprintRecoveryStaminaFraction
+
+		local function poolAt(fraction: number): StaminaState.StaminaState
+			return StaminaState.consume(StaminaState.new(MAX_STAMINA), MAX_STAMINA * (1 - fraction))
+		end
+
+		it("leaves sprinting alone while the pool has stamina in it", function()
+			expect(StaminaState.sprintLocked(StaminaState.new(MAX_STAMINA), false, RECOVERY)).toBe(
+				false
+			)
+			expect(StaminaState.sprintLocked(poolAt(0.01), false, RECOVERY)).toBe(false)
+		end)
+
+		it("engages the moment the pool is empty", function()
+			expect(StaminaState.sprintLocked(poolAt(0), false, RECOVERY)).toBe(true)
+		end)
+
+		it("engages on an empty pool however it was emptied", function()
+			-- A punch or a guard can empty the pool just as a sprint can, and the
+			-- lockout is defined against the pool rather than against what drained
+			-- it.
+			local emptiedByPunches =
+				StaminaState.consume(StaminaState.new(MAX_STAMINA), Config.PunchStaminaCost * 10)
+
+			expect(StaminaState.sprintLocked(emptiedByPunches, false, RECOVERY)).toBe(true)
+		end)
+
+		it("stays engaged through the first tick of regeneration", function()
+			-- The whole reason the release threshold is not zero: one tick back
+			-- would otherwise buy one tick of sprinting, ten times a second.
+			local recovered = StaminaState.regenerate(poolAt(0), 1)
+
+			expect(StaminaState.sprintLocked(recovered, true, RECOVERY)).toBe(true)
+		end)
+
+		it("stays engaged just below the recovery fraction", function()
+			local justShort = poolAt(RECOVERY - 0.01)
+
+			expect(StaminaState.sprintLocked(justShort, true, RECOVERY)).toBe(true)
+		end)
+
+		it("releases exactly at the recovery fraction", function()
+			-- Exact rather than "past", so the threshold is a value the pool
+			-- actually reaches rather than one it has to overshoot.
+			expect(StaminaState.sprintLocked(poolAt(RECOVERY), true, RECOVERY)).toBe(false)
+		end)
+
+		it("stays released once the pool is above the fraction", function()
+			expect(StaminaState.sprintLocked(poolAt(RECOVERY + 0.1), true, RECOVERY)).toBe(false)
+			expect(StaminaState.sprintLocked(StaminaState.new(MAX_STAMINA), true, RECOVERY)).toBe(
+				false
+			)
+		end)
+
+		it("re-engages if the pool empties again after recovering", function()
+			local recovered = poolAt(RECOVERY)
+			expect(StaminaState.sprintLocked(recovered, true, RECOVERY)).toBe(false)
+
+			local drainedAgain = StaminaState.consume(recovered, MAX_STAMINA)
+			expect(StaminaState.sprintLocked(drainedAgain, false, RECOVERY)).toBe(true)
+		end)
+
+		it("does not release early for a pool that was never locked", function()
+			-- An unlocked player below the recovery fraction is sprinting on the
+			-- last of their stamina, which is allowed. The fraction gates recovery
+			-- from empty, not sprinting in general.
+			expect(StaminaState.sprintLocked(poolAt(RECOVERY / 2), false, RECOVERY)).toBe(false)
+		end)
+
+		it("keeps a zero-max pool locked rather than dividing by it", function()
+			-- A mis-configured pool is empty by isEmpty before the release test is
+			-- ever reached, so the division in fillFraction cannot be the thing
+			-- that decides whether sprinting is allowed.
+			expect(StaminaState.sprintLocked(StaminaState.new(0), true, RECOVERY)).toBe(true)
+			expect(StaminaState.sprintLocked(StaminaState.new(0), false, RECOVERY)).toBe(true)
+		end)
+	end)
+
 	describe("damageMultiplier", function()
 		local ZERO_MULTIPLIER = Config.ZeroStaminaPunchDamageMultiplier
 

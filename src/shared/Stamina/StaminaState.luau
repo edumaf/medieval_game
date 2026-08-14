@@ -102,6 +102,44 @@ function StaminaState.canBlock(state: StaminaState): boolean
 end
 
 --[[
+	Whether sprinting is locked out, given whether it already was.
+
+	The one definition of the exhaustion rule, in the same place as canBlock and
+	for the same reason: RunningController applies it to the pool the server
+	sent, and it must not be able to drift from what the server charges for.
+
+	Unlike canBlock this is a latch rather than a plain predicate, because
+	"recovered enough" is not a property of the current value alone. Two
+	thresholds, and they are deliberately different:
+
+	  * It engages on an empty pool, whatever emptied it -- sprinting, a guard,
+	    or a punch.
+	  * It releases only once the pool is back to `recoveryFraction` of its
+	    maximum, which is what stops the lockout flickering off after one tick of
+	    regeneration.
+
+	`wasLocked` is the caller's previous answer, exactly as shouldReplicate takes
+	`lastSent`. That is what keeps the memory in the caller and this function
+	pure. The key is not an input, so releasing and re-pressing Shift while
+	exhausted cannot clear it.
+]]
+function StaminaState.sprintLocked(
+	state: StaminaState,
+	wasLocked: boolean,
+	recoveryFraction: number
+): boolean
+	if StaminaState.isEmpty(state) then
+		return true
+	end
+
+	if wasLocked then
+		return StaminaState.fillFraction(state) < recoveryFraction
+	end
+
+	return false
+end
+
+--[[
 	What a punch thrown in this state is worth, as a multiplier on the normal
 	punch damage.
 

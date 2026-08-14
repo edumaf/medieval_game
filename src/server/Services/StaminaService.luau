@@ -24,12 +24,20 @@
 	design: exactly one Heartbeat connection for the entire server, exactly one
 	place per player where the number moves, and no second timer anywhere.
 
-	Reaching zero has two consequences, both enforced server-side: punches drop
-	to Config.ZeroStaminaPunchDamageMultiplier of their damage (applied by
+	Reaching zero has three consequences. Two are enforced entirely here: punches
+	drop to Config.ZeroStaminaPunchDamageMultiplier of their damage (applied by
 	CombatService, which reads punchDamageMultiplier below), and a guard can
 	neither be started nor held (enforced by ParryService, which reads canBlock
 	and subscribes to onDepleted). A modified client cannot avoid either, because
 	neither asks the client anything.
+
+	The third is the sprint, and it is the one this service does not apply
+	itself: sprinting is a WalkSpeed, RunningController is the only writer of
+	that property, and making it server-authoritative is a movement change this
+	feature deliberately does not make (docs/decisions.md). What is enforced here
+	is the pool, which is the half that matters for recovery — a player the
+	server can still see sprinting is charged rather than regenerated, so no
+	client can refill while it keeps running.
 
 	Follows the HealthService pattern: state in a module-local table keyed by
 	Player, Init() registers the remote handler before any client can reach it,
@@ -54,9 +62,15 @@ local log = Logger.forScope("StaminaService")
 type Record = {
 	state: StaminaState.StaminaState,
 
-	-- What the client says it is asking for. Never trusted as a stamina value —
-	-- it says which state the player wants to be in, and the drain is computed
-	-- here from this server's own clock.
+	-- What the client says it is doing. Never trusted as a stamina value — it
+	-- says which state the player is in, and the drain is computed here from
+	-- this server's own clock.
+	--
+	-- An honest client reports false once its pool is empty, because a sprint
+	-- it has locked out is not a sprint (SprintState.isSprinting). That is what
+	-- lets the regeneration branch below be reached under a held key; a client
+	-- that keeps reporting true instead keeps paying the drain and stays at
+	-- zero, which is the server-side half of the recovery rule.
 	sprinting: boolean,
 
 	-- Mirror of ParryService's authoritative phase, pushed in by setBlocking.
