@@ -33,6 +33,30 @@ export type PlayerSession = {
 }
 
 --[[
+	Everything needed to build one Sound, as stored in Config and consumed by
+	Shared/Util/Audio. Shared rather than client-side because the server builds
+	one too: the punch impact is created server-side so both players hear it.
+
+	`id` is an `rbxassetid://` string, or empty for "no sound uploaded yet" —
+	the same convention Config.PunchAnimationId uses, and handled the same way.
+
+	The two roll-off distances are always present, because Roblox's Sound always
+	has them, but they only do anything for a sound parented to a BasePart. A
+	Sound anywhere else — SoundService, a ScreenGui — plays flat at full volume
+	wherever the listener is standing, and ignores both. That is what the
+	damage, healing and punch-swing sounds rely on, and it is why their values
+	here are inert rather than absent: a spec that is later re-parented onto a
+	character should not have to grow two new fields to start behaving.
+]]
+export type SoundSpec = {
+	id: string,
+	volume: number,
+	playbackSpeed: number,
+	rollOffMinDistance: number,
+	rollOffMaxDistance: number,
+}
+
+--[[
 	Payload the server returns from the Handshake RemoteFunction. Used to detect
 	a client running a stale build against a newer server.
 ]]

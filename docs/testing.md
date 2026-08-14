@@ -23,6 +23,7 @@ why, and "Gameplay testing" in the README for what Play mode is actually for.
 tests/
   jest.config.luau          testMatch — do not rename spec files without updating this
   shared/
+    Audio.spec.luau
     Config.spec.luau
     Logger.spec.luau
     Combat/
@@ -634,3 +635,75 @@ Health section above. Steps 15–18 need a second player.
 22. Leave and rejoin the server. Confirm you spawn with a clear screen.
 23. Check Output for errors or warnings throughout — a character being removed
     while an effect is playing must produce nothing at all.
+
+## Manual verification: Combat and health audio
+
+`Audio`'s fitting arithmetic — how far the swing may be pitched, and when the
+rest has to be faded — is covered by `tests/shared/Audio.spec.luau`, and the
+shipped ids, volumes and bounds by `Config.spec.luau`. Nothing in either can
+tell you whether it *sounds* right, or whether two sounds that must overlap
+actually do. All of that is by ear.
+
+Steps 1–8 are solo **Play**. Steps 9–16 need **Test → Clients and Servers**
+with 2 players.
+
+**Punch swing**
+
+1. Left click. Confirm the whoosh starts with the swing, not before it and not
+   after it.
+2. Confirm it is finished by the time the arm is back down. A whoosh still
+   going while you are standing idle means the fade is not being scheduled —
+   check `Config.PunchSwingFadeSeconds` and the playback speed bounds.
+3. Confirm the swing does not sound obviously pitch-shifted or chipmunked. If
+   it does, widen the gap between the animation and the sound with the fade
+   rather than with `PunchSwingMaxPlaybackSpeed`.
+4. Click as fast as the cooldown allows. Confirm you hear one whoosh per swing,
+   restarting cleanly, never two layered on top of each other.
+5. Punch, and while the swing is still playing, reset (Esc → Reset Character).
+   Confirm the whoosh stops with the character rather than continuing over the
+   respawn.
+6. Punch immediately after respawning, several times over. Confirm the swing is
+   audible every time and at full volume — a swing that goes silent after the
+   first fade means the volume is not being restored.
+7. Hold Q and click. Confirm **no swing sound at all**, matching the animation:
+   the punch never happened.
+8. Punch at empty air, with nobody in front of you. Confirm you hear the swing
+   and **no impact**.
+
+**Punch impact** (2 players)
+
+9. Punch player B from in front, in range. Confirm a distinct impact sound
+   lands mid-swing, on the same frame the health bar drops.
+10. Confirm the impact does **not** cut the whoosh off. Both should be audible,
+    the impact layered on top of a swing that keeps going. A whoosh that stops
+    dead the instant the hit lands is the failure this is written to catch.
+11. Confirm **B** hears the impact too, and that it comes from the right place —
+    have B face away and confirm it is behind them.
+12. Walk A well away from B and punch. Confirm neither player hears an impact.
+13. Have B hold Q and parry a punch from the front. Confirm there is **no
+    impact sound** — a parried punch dealt no damage and must sound like it.
+14. Confirm B hears **no swing sound** from A. That is expected, not a bug: the
+    swing is local to the attacker. See `docs/decisions.md`.
+
+**Health feedback** (steps 15–16 with 2 players; the rest solo)
+
+15. `/damage 25`. Confirm a damage sound plays with the red vignette, starting
+    and finishing with it.
+16. `/heal 25`. Confirm a different, healing sound plays with the green
+    vignette.
+17. `/damage 10` five times quickly. Confirm the sound restarts cleanly each
+    time and never stacks into a chorus.
+18. `/damage 40` then `/heal 40` immediately. Confirm the damage sound is
+    replaced by the healing one rather than both playing at once, matching what
+    the vignette does.
+19. `/heal 40` then `/damage 40` immediately. Confirm the reverse.
+20. `/damage 500` from full health. Confirm the death vignette plays in
+    **silence** — no damage sting on the killing blow. That is deliberate; see
+    `docs/decisions.md`.
+21. `/damage 20`, and while the red is still fading, `/damage 500`. Confirm the
+    damage sound stops when the death effect takes over rather than finishing
+    underneath it.
+22. Respawn. Confirm nothing is left playing.
+23. In a 2-player test, damage **one** player. Confirm only that player hears
+    the damage sound — the other must hear nothing at all. Repeat for `/heal`.
+24. Check Output for errors or warnings throughout.

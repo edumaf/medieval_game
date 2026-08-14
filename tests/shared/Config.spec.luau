@@ -8,6 +8,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local JestGlobals = require(ReplicatedStorage.DevPackages.JestGlobals)
+local Types = require(ReplicatedStorage.Shared.Types)
 
 local describe = JestGlobals.describe
 local expect = JestGlobals.expect
@@ -133,6 +134,73 @@ describe("Shared.Config", function()
 		-- would drop hits that should be drawn.
 		expect(Config.ScreenEffectMinHealthChange > 0).toBe(true)
 		expect(Config.ScreenEffectMinHealthChange < Config.PunchDamage).toBe(true)
+	end)
+
+	it("states every sound as an asset id, or as no sound at all", function()
+		-- Same convention and same failure mode as the two animation ids: a
+		-- malformed id is silent in game, and empty is the supported "not
+		-- uploaded yet" state that Audio.create answers nil for.
+		local sounds: { Types.SoundSpec } = {
+			Config.PunchSwingSound,
+			Config.PunchImpactSound,
+			Config.ScreenEffectDamageSound,
+			Config.ScreenEffectHealSound,
+		}
+
+		for _, spec in sounds do
+			expect(spec.id).toEqual(expect.any("string"))
+			if spec.id ~= "" then
+				expect(string.match(spec.id, "^rbxassetid://%d+$")).never.toBeNil()
+			end
+
+			-- Zero volume is a sound nobody can hear, which is indistinguishable
+			-- from a broken one; above 1 is clipping.
+			expect(spec.volume > 0).toBe(true)
+			expect(spec.volume <= 1).toBe(true)
+
+			-- Zero or negative would never finish, and Audio's fade arithmetic
+			-- divides by it.
+			expect(spec.playbackSpeed > 0).toBe(true)
+		end
+	end)
+
+	it("freezes each sound spec, not just the config around them", function()
+		-- table.freeze is shallow, so without freezing these individually they
+		-- would be the one writable corner of an otherwise immutable Config.
+		expect(table.isfrozen(Config.PunchSwingSound)).toBe(true)
+		expect(table.isfrozen(Config.PunchImpactSound)).toBe(true)
+		expect(table.isfrozen(Config.ScreenEffectDamageSound)).toBe(true)
+		expect(table.isfrozen(Config.ScreenEffectHealSound)).toBe(true)
+	end)
+
+	it("gives the punch impact a longer reach than the swing has", function()
+		-- The impact is the half of the punch other players are meant to hear,
+		-- and the only one of the four that is actually positional. The
+		-- ordering is the part worth pinning: a swing audible from further away
+		-- than the hit it belongs to would be backwards.
+		expect(
+			Config.PunchImpactSound.rollOffMaxDistance > Config.PunchSwingSound.rollOffMaxDistance
+		).toBe(true)
+
+		for _, spec in { Config.PunchSwingSound, Config.PunchImpactSound } :: { Types.SoundSpec } do
+			expect(spec.rollOffMinDistance > 0).toBe(true)
+			expect(spec.rollOffMinDistance < spec.rollOffMaxDistance).toBe(true)
+		end
+	end)
+
+	it("keeps the swing's pitch correction within a tone either way", function()
+		-- These bounds are what stops fitting the sound to the animation from
+		-- turning it into a different sound; whatever they refuse is faded out
+		-- instead. Straddling 1 is what lets a sound be corrected in either
+		-- direction.
+		expect(Config.PunchSwingMinPlaybackSpeed > 0).toBe(true)
+		expect(Config.PunchSwingMinPlaybackSpeed <= 1).toBe(true)
+		expect(Config.PunchSwingMaxPlaybackSpeed >= 1).toBe(true)
+		expect(Config.PunchSwingMaxPlaybackSpeed <= 2).toBe(true)
+
+		-- The fade has to fit inside the swing it is trimming.
+		expect(Config.PunchSwingFadeSeconds > 0).toBe(true)
+		expect(Config.PunchSwingFadeSeconds < Config.PunchCooldownSeconds).toBe(true)
 	end)
 
 	it("keeps sprinting faster than walking, and walking faster than guarding", function()

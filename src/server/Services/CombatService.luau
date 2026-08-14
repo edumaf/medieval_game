@@ -24,6 +24,12 @@
 	ParryService, which holds the authoritative phase. When nobody is parrying
 	both gates are false and everything below runs exactly as it did before.
 
+	A landed punch also makes a sound, from the target's root part, created here
+	on the server so both players hear it from where it happened. That is the
+	only presentation this service owns, and it is here because it is the only
+	place that knows a punch connected — the attacker's client is never told.
+	Nothing about the decision above changes for it.
+
 	Follows the HealthService pattern: state in a module-local table keyed by
 	Player, Init() registers the remote handler before any client can reach
 	it, and per-player state is released on PlayerRemoving.
@@ -33,6 +39,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Audio = require(Shared.Util.Audio)
 local Config = require(Shared.Config)
 local Logger = require(Shared.Util.Logger)
 local Net = require(Shared.Net)
@@ -167,6 +174,24 @@ local function onPunchRequest(attacker: Player)
 	end
 
 	local remaining = HealthService.takeDamage(target, Config.PunchDamage)
+
+	-- The impact, played from the target's own HumanoidRootPart. This service
+	-- has no hit part and no hitbox to speak of — reach is a distance between
+	-- two root parts and the cone is a dot product, so the target's root part
+	-- *is* where this architecture says the punch landed, and it is already
+	-- resolved above rather than looked up again.
+	--
+	-- Made on the server, deliberately: a Sound inside a replicated part is
+	-- heard by every client near it, so both players hear the hit from the
+	-- right place with no remote and no second copy of "did it land". A client
+	-- could not do this — it is not told whether its punch connected, which is
+	-- the whole point of PunchRequest carrying no arguments.
+	--
+	-- After the damage rather than before it, so a punch that a guard stopped,
+	-- or that reached nobody, plays nothing. The attacker's own swing sound is
+	-- a separate instance on their own client and is untouched by this.
+	Audio.playOnce(Config.PunchImpactSound, targetRoots[index])
+
 	log.info(`{attacker.Name} punched {target.Name} for {Config.PunchDamage} -> {remaining}`)
 end
 

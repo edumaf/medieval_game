@@ -30,6 +30,17 @@
 	                          is what lets death expand towards the centre.
 	  BackgroundColor3        red or green, set once when an effect starts.
 
+	Damage and healing also have a sound, and it is driven from that same level
+	rather than given a duration of its own: the volume is the effect's own 0-to-1
+	envelope scaled by the configured peak, so each sound fades in with its
+	vignette and is silent by the time the colour is gone. There is no second
+	timing system to keep in step, because there is no second timing system —
+	retuning ScreenEffectFadeSeconds moves the audio with the colour. The two
+	sounds are flat rather than positional: this is the player's own body
+	reporting to them, not an event at a place in the world, and only they hear
+	it. Dying has no sound of its own yet, and silences whichever of the two was
+	playing.
+
 	Unlike every other screen in this game, these instances are built here
 	rather than authored in Studio (docs/ui-workflow.md). That rule exists to
 	keep layout in the designer's hands, and this has no layout to hand over:
@@ -43,9 +54,11 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local SoundService = game:GetService("SoundService")
 local TweenService = game:GetService("TweenService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Audio = require(Shared.Util.Audio)
 local Config = require(Shared.Config)
 local Logger = require(Shared.Util.Logger)
 
@@ -114,6 +127,18 @@ local BAND_LAYOUTS: { BandLayout } = {
 	},
 }
 
+--[[
+	The sound each kind of effect plays, or nothing for a kind that has none.
+	Death is absent on purpose rather than by omission: no death sting has been
+	uploaded, and borrowing the damage one would contradict the whole point of
+	the death effect being unlike being hit. Adding one is an entry here and an
+	entry in Config, and nothing else.
+]]
+local FEEDBACK_SPECS: { [string]: Audio.SoundSpec } = {
+	damage = Config.ScreenEffectDamageSound,
+	heal = Config.ScreenEffectHealSound,
+}
+
 local TUNING: ScreenEffectState.Tuning = {
 	damageColor = Config.ScreenEffectDamageColor,
 	healColor = Config.ScreenEffectHealColor,
@@ -152,6 +177,15 @@ local bands: { Frame } = {}
 local level: NumberValue? = nil
 
 local activeTween: Tween? = nil
+
+-- One Sound per kind, built once at Start and reused, so the assets are loaded
+-- before the first hit rather than on it, and so a run of damage can never
+-- accumulate instances. Whichever is playing is remembered alongside its peak
+-- volume, because `level` supplies only the 0-to-1 envelope and the peak is
+-- what that envelope is scaled against.
+local feedbackSounds: { [string]: Sound? } = {}
+local playingSound: Sound? = nil
+local playingVolume = 0
 
 -- Bumped on every tween this controller starts. A Completed handler that finds
 -- the counter has moved on belongs to a tween something replaced, and must not
@@ -193,10 +227,20 @@ local function render()
 		for _, band in bands do
 			band.BackgroundTransparency = 1
 		end
+		if playingSound then
+			playingSound.Volume = 0
+		end
 		return
 	end
 
 	local alpha = math.clamp(driver.Value, 0, 1)
+
+	-- The sound rides the same envelope as the colour, which is what makes them
+	-- one event rather than two of similar length. A hit landing mid-fade lifts
+	-- both back up together; a respawn takes both down together.
+	if playingSound then
+		playingSound.Volume = playingVolume * alpha
+	end
 	local transparency = 1 - effect.intensity * alpha
 	-- Every effect starts from the resting reach and grows towards its own.
 	-- For damage and healing the two are the same value, so the bands hold
@@ -224,6 +268,52 @@ local function setVisible(visible: boolean)
 	if screenGui then
 		screenGui.Enabled = visible
 	end
+end
+
+--[[
+	Silences whichever feedback sound is playing, if any.
+
+	Stopped rather than left to finish: a heal sound still running under a hit
+	that has already replaced it on screen is the audio equivalent of two
+	vignettes at once. Safe to call when nothing is playing.
+]]
+local function stopFeedbackSound()
+	local sound = playingSound
+	if sound then
+		sound:Stop()
+		playingSound = nil
+	end
+	playingVolume = 0
+end
+
+--[[
+	Starts the sound belonging to `kind`, if it has one.
+
+	Always exactly one sound: the previous is stopped first, so repeated damage
+	restarts a single instance instead of layering, and a heal landing on a
+	fading hit replaces it rather than playing over it. Both match what the
+	vignette does with the same events.
+
+	The volume is left to render(), which is called immediately afterwards — the
+	sound therefore begins at whatever the effect's current level is, so a hit
+	arriving mid-fade does not restart the sound from silence any more than it
+	restarts the colour from clear.
+]]
+local function startFeedbackSound(kind: ScreenEffectState.EffectKind)
+	stopFeedbackSound()
+
+	local sound = feedbackSounds[kind]
+	if sound == nil then
+		return
+	end
+
+	local spec = FEEDBACK_SPECS[kind]
+	playingSound = sound
+	playingVolume = spec.volume
+
+	sound.Volume = 0
+	sound.TimePosition = 0
+	sound:Play()
 end
 
 --[[
@@ -276,6 +366,9 @@ end
 local function finish()
 	state = ScreenEffectState.initial()
 	render()
+	-- After render, which has already taken the volume to zero, so this only
+	-- releases a sound that is already silent rather than cutting one off.
+	stopFeedbackSound()
 	setVisible(false)
 end
 
@@ -303,6 +396,10 @@ local function show(effect: ScreenEffectState.ScreenEffect)
 
 	setColor(showing.color)
 	setVisible(true)
+	-- Before render, so the new sound is the one whose volume render sets. A
+	-- death has no sound of its own, so this silences whatever was playing and
+	-- leaves the death vignette to run in silence.
+	startFeedbackSound(showing.kind)
 	render()
 
 	if showing.kind == "death" then
@@ -467,10 +564,31 @@ local function buildUi(): boolean
 	return true
 end
 
+--[[
+	Builds the feedback sounds, once, before anything can trigger one. Parented
+	to SoundService rather than to the character: they are flat sounds that only
+	this player hears, and putting them in a character would have them destroyed
+	underneath this controller on every respawn.
+
+	A kind whose Config entry has no id gets no entry here, which leaves
+	startFeedbackSound a no-op for it — the vignette still plays, silently.
+]]
+local function buildSounds()
+	for kind, spec in FEEDBACK_SPECS do
+		local sound = Audio.create(spec, SoundService)
+		if sound then
+			sound.Name = `ScreenEffect_{kind}`
+			feedbackSounds[kind] = sound
+		end
+	end
+end
+
 function ScreenEffectsController.Start()
 	if not buildUi() then
 		return
 	end
+
+	buildSounds()
 
 	player.CharacterAdded:Connect(onCharacterAdded)
 	player.CharacterRemoving:Connect(function()

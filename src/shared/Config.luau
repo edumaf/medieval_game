@@ -238,6 +238,93 @@ local Config = {
 	-- Short, but not instant — a death vignette that vanished on one frame
 	-- would read as a glitch rather than as respawning.
 	ScreenEffectClearSeconds = 0.3,
+
+	--[[
+		Sound. Each entry is a Types.SoundSpec: an asset id, a volume, a
+		playback speed, and how far away it can be heard.
+
+		An empty `id` means "no sound uploaded yet" and is a supported state,
+		exactly as it is for the punch and parry animations: the system still
+		works, it just plays nothing. Audio.create returns nil for one.
+
+		Only PunchImpactSound is actually positional. The other three are
+		parented to SoundService rather than to a character, and Roblox ignores
+		roll-off entirely for a Sound that is not under a BasePart — so their
+		distances below are inert, and are there so a spec that is later moved
+		onto a character behaves without having to grow new fields.
+
+		Frozen individually because table.freeze is shallow. Without this the
+		nested tables would be the one writable corner of a config the rest of
+		the game is guaranteed cannot change under it.
+	]]
+
+	-- The fist travelling, not the impact. Played by PunchController the moment
+	-- the swing animation starts, and fitted to that animation's length — see
+	-- the playback speed bounds below.
+	--
+	-- Heard by the attacker alone, and so flat: sounds made on a client do not
+	-- replicate, and the attacker is always exactly where their own listener
+	-- is, so a position would make no audible difference. Making it audible to
+	-- everyone would mean moving it onto the character *and* adding a remote
+	-- whose only purpose is a sound — see docs/decisions.md.
+	PunchSwingSound = table.freeze({
+		id = "rbxassetid://71966554416300",
+		volume = 0.5,
+		playbackSpeed = 1,
+		rollOffMinDistance = 6,
+		rollOffMaxDistance = 45,
+	}),
+
+	-- The hit landing. Played by CombatService, on the server, from the
+	-- target's HumanoidRootPart, so both players hear it from where the punch
+	-- actually connected. This one is genuinely positional, and carries
+	-- further than the swing would: a punch you can see across a courtyard
+	-- should be a punch you can hear.
+	PunchImpactSound = table.freeze({
+		id = "rbxassetid://120665243125186",
+		volume = 0.7,
+		playbackSpeed = 1,
+		rollOffMinDistance = 8,
+		rollOffMaxDistance = 80,
+	}),
+
+	-- The two health-feedback sounds, played by ScreenEffectsController for the
+	-- local player only and flat for the same reason the swing is — this is
+	-- your own body reporting to you, not something happening at a place in
+	-- the world.
+	--
+	-- Their volume is driven by the same 0-to-1 level that drives the vignette,
+	-- so each one fades in and out exactly with the red or green on screen and
+	-- has no duration of its own to keep in step. These are the peak volumes
+	-- that level is scaled against.
+	ScreenEffectDamageSound = table.freeze({
+		id = "rbxassetid://95780005590485",
+		volume = 0.6,
+		playbackSpeed = 1,
+		rollOffMinDistance = 10,
+		rollOffMaxDistance = 60,
+	}),
+	ScreenEffectHealSound = table.freeze({
+		id = "rbxassetid://119704275114635",
+		volume = 0.5,
+		playbackSpeed = 1,
+		rollOffMinDistance = 10,
+		rollOffMaxDistance = 60,
+	}),
+
+	-- How far the swing sound may be pitched to fit the punch animation.
+	--
+	-- Fitting exactly would mean playing it at `soundLength / animationLength`,
+	-- which for a sound much longer than the swing is a large pitch shift and
+	-- sounds like a different sound. These bounds cap that at roughly a tone
+	-- either way; anything the cap refuses is taken off the end with a fade
+	-- instead, which is inaudible where pitching is not.
+	PunchSwingMinPlaybackSpeed = 0.85,
+	PunchSwingMaxPlaybackSpeed = 1.3,
+
+	-- How long that fade takes. Long enough not to click, short enough that the
+	-- tail does not outlast the swing it belongs to.
+	PunchSwingFadeSeconds = 0.08,
 }
 
 return table.freeze(Config)

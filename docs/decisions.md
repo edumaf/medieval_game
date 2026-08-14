@@ -793,3 +793,110 @@ is not quite enough, because the fade a hit queues is started from the rise's
 `Completed` handler: a generation counter makes a handler belonging to a
 replaced tween do nothing, so a stale fade can never start on top of a newer
 effect.
+
+## Combat and health audio
+
+Four sounds landed at once — a punch swing, a punch impact, a damage sting and
+a heal sting — and they are deliberately not one system. Each is played by the
+system that already owns the event it belongs to.
+
+### A helper in `Shared/Util`, not an audio controller
+
+`Shared/Util/Audio.luau` builds a Sound from a `Types.SoundSpec` and starts it.
+That is the whole of it: no manager, no channel table, no registry, no state,
+and nothing in the boot sequence. Every caller keeps its own Sound and decides
+when it starts and stops, because every one of them already owns the event that
+decides.
+
+An `AudioController` was the alternative and would have been worse. Three
+systems need a sound, and each needs it at a different moment, in a different
+realm, with a different lifetime — a controller in the middle would have to be
+told all three of those things by the caller anyway, and would add a boot entry
+and an indirection for it. What the three actually share is six property
+assignments and a cleanup rule, so that is what was factored out. Nothing is
+scattered: every id, volume, speed and roll-off distance is in `Config`.
+
+It is in `Shared/Util` rather than under `src/client` because the server needs
+it too. See below.
+
+### The impact is played by the server, the swing by the client
+
+They are split because the two events live in different places, not for
+symmetry.
+
+The **swing** starts on the same line as the animation, in `PunchController`,
+because that is where a punch visibly begins. It is fitted to
+`AnimationTrack.Length` rather than to a duration written down anywhere, so a
+re-exported animation re-fits the sound instead of drifting from it — the same
+reason the hit timing comes from a marker rather than a `task.wait`. Speed does
+as much of the fitting as it can within `PunchSwingMinPlaybackSpeed` and
+`PunchSwingMaxPlaybackSpeed`, and a short fade takes off whatever the cap
+refused, so a much longer sound is trimmed rather than pitched into a different
+sound.
+
+The **impact** is created in `CombatService`, on the server, inside the target's
+`HumanoidRootPart`. A Sound inside a replicated part is heard by every client
+near it, so both players hear the hit, positioned, with no remote at all. The
+client could not do this even if we wanted it to: `PunchRequest` carries no
+arguments and the attacker is never told whether it connected, which is the
+whole point of that design. Playing it client-side would mean either a new
+remote whose only cargo is a sound, or the client deciding it hit — and the
+second is the thing this codebase is built not to do.
+
+There is no hit part or hitbox to originate it from, because this combat system
+has none: reach is a distance between two root parts and the cone is a dot
+product. The target's root part *is* where this architecture says the punch
+landed, and `CombatService` already has it in hand from target selection.
+
+The consequence, stated plainly: **only the attacker hears their own swing.**
+Sounds made on a client do not replicate, and the server does not learn a punch
+happened until the `Hit` marker — half way through the swing, which is the wrong
+moment to start a whoosh. Making the swing audible to everyone means moving it
+onto the character and adding a remote for it. The half that matters to the
+player being hit is the impact, and that one is heard by both.
+
+### Overlap is structural, not managed
+
+The swing and the impact never interfere because they are not the same Sound,
+not in the same realm, and not owned by the same system. `PunchController` can
+restart or fade its swing as often as it likes and the impact — a separate,
+server-created, self-destroying instance — is untouched. There is no mixer
+deciding they may overlap; there is nothing that could stop them.
+
+Within each sound, repeats restart rather than layer, matching what the systems
+around them already do. A new punch stops the previous swing exactly as it stops
+the previous animation, and a new health event replaces the feedback sound
+exactly as it replaces the vignette. So mashing the punch key produces one
+whoosh at a time and as many impacts as actually landed, which is the correct
+answer to both.
+
+### Health feedback has no timing of its own
+
+The damage and heal sounds do not have a duration, a fade, or a timer. Their
+volume is `peak × level`, where `level` is the same 0-to-1 driver
+`ScreenEffectsController` already uses for the vignette's transparency and
+reach.
+
+That is what "synchronised" means here, rather than two systems configured to
+similar numbers: there is one envelope. A hit landing mid-fade lifts the colour
+and the sound together, a heal replaces both, a respawn takes both down, and
+retuning `ScreenEffectFadeSeconds` moves the audio with it because there is
+nothing else to move. The sound cannot outlive the vignette, because it is
+silent whenever the vignette is clear.
+
+They are flat rather than positional — parented to `SoundService`, not to a
+character. This is the player's own body reporting to them, and only they hear
+it; a Sound outside a `BasePart` ignores roll-off entirely. That also means
+neither can be destroyed underneath the controller when a character is removed,
+which is why the punch swing is parented there too.
+
+### Dying is silent, for now
+
+No death sound was uploaded, and the killing blow is classified as a death
+rather than as damage (see the screen effects section above), so it does not
+play the damage sting either. Borrowing that sting would make dying sound like
+being hit, which is the one thing the death effect exists not to be.
+
+Adding one later is an entry in `Config` and an entry in `FEEDBACK_SPECS`, and
+nothing else — the death effect already runs through the same envelope, so it
+would be fitted to the spread automatically.

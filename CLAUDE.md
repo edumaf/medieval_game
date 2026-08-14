@@ -23,6 +23,7 @@ having no gameplay, and do not rebuild what is listed below.
 | Parry (hold Q) | `ParryService` | `ParryController` | `Shared/Combat/ParryState` |
 | Sprint (hold Shift) | — client-only | `RunningController/` | `SprintState` |
 | Damage/heal/death vignette | — client-only | `ScreenEffectsController/` | `ScreenEffectState` |
+| Combat/health audio | `CombatService` (impact) | `PunchController` (swing), `ScreenEffectsController` (stings) | `Shared/Util/Audio` |
 | Boot handshake | `SessionService` | `SessionController` | — |
 
 Combat specifics that are easy to break:
@@ -42,6 +43,13 @@ Combat specifics that are easy to break:
 - `RunningController` is the **only** writer of `Humanoid.WalkSpeed`.
   `ParryController` reports intent to it; it must never set the property
   itself.
+- The punch swing sound is fitted to `AnimationTrack.Length`, not to a written
+  duration. The punch impact is created **on the server**, in the target's
+  `HumanoidRootPart` — the client is never told whether it hit. The two are
+  separate Sound instances in separate realms, which is what lets them overlap;
+  do not route them through anything shared.
+- `Shared/Util/Audio` builds and starts a Sound and nothing else. Do not grow it
+  into an audio manager.
 - Every tunable number lives in `Shared/Config.luau`.
 
 ## Source tree
