@@ -78,14 +78,13 @@ describe("Shared.Config", function()
 	end)
 
 	it("ships the agreed parry numbers", function()
-		-- Pinned deliberately. These three were settled decisions rather than
-		-- tuning knobs, and each has a rule attached that is not obvious from
-		-- the number alone: the arc is the forward hemisphere, the slowdown is
-		-- half of walking, and the ceiling is a lifetime bound rather than a
-		-- wind-up. Changing one should be a decision, not a diff nobody noticed.
+		-- Pinned deliberately. Both were settled decisions rather than tuning
+		-- knobs, and each has a rule attached that is not obvious from the
+		-- number alone: the arc is the forward hemisphere, and the slowdown is
+		-- half of walking. Changing one should be a decision, not a diff nobody
+		-- noticed.
 		expect(Config.ParryWalkSpeed).toBe(8)
 		expect(Config.ParryMinFacingDot).toBe(0)
-		expect(Config.ParryMaxHoldSeconds).toBe(5)
 	end)
 
 	it("guards at least the forward hemisphere and never the back", function()
@@ -106,12 +105,4 @@ describe("Shared.Config", function()
 		expect(Config.NormalWalkSpeed < Config.SprintWalkSpeed).toBe(true)
 	end)
 
-	it("bounds a held guard well past any real exchange", function()
-		-- The ceiling has to be long enough that an honest player holding a
-		-- guard never reaches it in a fight, and short enough that it actually
-		-- bounds a client that stops sending "end". It is not derived from the
-		-- animation and must never be used as a wind-up duration.
-		expect(Config.ParryMaxHoldSeconds > 0).toBe(true)
-		expect(Config.ParryMaxHoldSeconds >= 1).toBe(true)
-	end)
 end)

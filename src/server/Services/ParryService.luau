@@ -10,12 +10,17 @@
 	and server-side character positions.
 
 	What the server actually guarantees, and what it does not, is written out in
-	docs/decisions.md. In short: the protected state, the direction and the
-	maximum hold are decided here; the movement slowdown is not, because
-	WalkSpeed is still client-authoritative. A modified client can therefore
-	skip the wind-up, guard without playing the animation, and guard at full
-	speed. It cannot widen the arc, guard from the rear, keep a guard alive past
-	Config.ParryMaxHoldSeconds, or punch while the server has it engaged.
+	docs/decisions.md. In short: the protected phase and the direction are
+	decided here; the movement slowdown is not, because WalkSpeed is still
+	client-authoritative. A modified client can therefore skip the wind-up,
+	guard without playing the animation, guard at full speed, and hold a guard
+	for as long as it likes by never sending "end". It cannot widen the arc,
+	guard from the rear, or punch while the server has it engaged.
+
+	A guard lasts until the client says it is over, or until a lifecycle event
+	ends it. There is deliberately no maximum duration: holding Q is meant to
+	keep guarding for as long as the player holds it, and any ceiling that
+	bounded a modified client would cut an honest one off mid-guard as well.
 
 	Every transition that arrives with a legal shape is applied. There is no
 	rate limiter on the phase, deliberately: dropping a valid transition would
@@ -66,7 +71,7 @@ local function onParryStateRequest(player: Player, transition: any)
 	-- cases here, so this handler never has to reason about what came before —
 	-- and every legal transition is applied, always.
 	local requested = transition :: ParryState.Transition
-	states[player] = ParryState.apply(stateOf(player), requested, os.clock())
+	states[player] = ParryState.apply(stateOf(player), requested)
 end
 
 --[[
@@ -75,9 +80,7 @@ end
 	CombatService uses this to refuse a punch thrown out of a guard. It covers
 	the wind-up as well as the held guard on purpose: the attempt is what costs
 	the player their swing, so cancelling before Hold is not a way to punch for
-	free. It also covers a guard that has outlived Config.ParryMaxHoldSeconds —
-	the protection expires, the commitment does not, so holding the key still
-	means no punching.
+	free.
 ]]
 function ParryService.isEngaged(player: Player): boolean
 	return ParryState.isEngaged(stateOf(player))
@@ -105,29 +108,11 @@ function ParryService.isProtectedFrom(
 	defenderRoot: BasePart,
 	attackerPosition: Vector3
 ): boolean
-	local state = stateOf(defender)
-	local now = os.clock()
-
-	-- A guard that has run out is cleared here rather than by a timer. This is
-	-- the moment somebody actually asked, which makes it the cheapest possible
-	-- place to notice, and it stops an abandoned "active" sitting in the table
-	-- until the character is replaced.
-	if ParryState.isExpired(state, now, Config.ParryMaxHoldSeconds) then
-		states[defender] = nil
-		return false
-	end
-
 	local rootCFrame = defenderRoot.CFrame
 	local attackerDot =
 		ParryState.attackerDot(rootCFrame.LookVector, rootCFrame.Position, attackerPosition)
 
-	return ParryState.isProtectedFrom(
-		state,
-		attackerDot,
-		Config.ParryMinFacingDot,
-		now,
-		Config.ParryMaxHoldSeconds
-	)
+	return ParryState.isProtectedFrom(stateOf(defender), attackerDot, Config.ParryMinFacingDot)
 end
 
 function ParryService.Init()

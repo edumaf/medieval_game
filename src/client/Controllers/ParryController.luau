@@ -19,12 +19,10 @@
 	rather than by looping it or re-playing it, so the animation is started
 	exactly once per parry and the marker fires exactly once.
 
-	This controller does not enforce Config.ParryMaxHoldSeconds, and does not
-	try to mirror it. The ceiling exists to bound what a client that stops
-	reporting can sit in, so enforcing it here would be enforcing it in the one
-	place that cannot be trusted to. The visible consequence is that holding Q
-	past the ceiling keeps showing the guard pose after the server has stopped
-	honouring it — see docs/decisions.md, where that divergence is accepted.
+	A guard lasts as long as the key is held. There is no maximum duration on
+	either side, so the pose the player sees and the protection the server
+	grants begin and end together — the only things that finish a parry are
+	releasing Q, death, and a character being replaced.
 
 	The animation is played on the local character's own Animator. A player's
 	character is client-network-owned, so that play call replicates to the
@@ -118,7 +116,7 @@ local function endParry()
 		return
 	end
 
-	state = ParryState.apply(state, "end", os.clock())
+	state = ParryState.apply(state, "end")
 
 	local track = parryTrack
 	if track then
@@ -144,7 +142,7 @@ local function onHoldReached()
 		return
 	end
 
-	state = ParryState.apply(state, "hold", os.clock())
+	state = ParryState.apply(state, "hold")
 
 	local track = parryTrack
 	if track then
@@ -245,7 +243,7 @@ local function onInputBegan(input: InputObject, gameProcessedEvent: boolean)
 		return
 	end
 
-	state = ParryState.apply(state, "begin", os.clock())
+	state = ParryState.apply(state, "begin")
 	-- The slowdown starts with the attempt, not with the guard, so a parry that
 	-- is cancelled before Hold has still cost the player something.
 	RunningController.setParryActive(true)

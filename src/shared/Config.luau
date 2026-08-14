@@ -172,22 +172,6 @@ local Config = {
 	-- forever — slowed and unable to punch, but never protected — and nothing
 	-- errors. The two values have to be changed together.
 	ParryHoldMarkerName = "Hold",
-
-	-- Longest a single raised guard may protect anyone, in seconds.
-	--
-	-- This is NOT the animation's wind-up and must never be used as one: it
-	-- says nothing about when protection starts, only when it stops. It exists
-	-- because "end" is a message from the client, and a client that simply
-	-- never sends one would otherwise stay protected for the whole life of its
-	-- character. ParryService checks it when a punch arrives, so enforcing it
-	-- costs no timer and no Heartbeat connection.
-	--
-	-- 5 is well past any real exchange — a guard is held for a moment, not for
-	-- seconds — while still bounding the state a modified client can sit in.
-	-- An honest player who holds Q longer than this stops being protected and
-	-- has to release and press again, which is why it should not be tightened
-	-- towards the length of a normal guard.
-	ParryMaxHoldSeconds = 5,
 }
 
 return table.freeze(Config)

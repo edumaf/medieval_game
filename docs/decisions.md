@@ -480,13 +480,14 @@ What the server decides, and a modified client cannot touch:
   the wire influences it, so the rear half cannot be closed from the client.
 - **The damage.** `CombatService` still decides who was hit and for how much,
   and `HealthService` still applies it.
-- **How long one guard lasts.** See `ParryMaxHoldSeconds` below.
 - **Whether a guarding player may punch.** `CombatService` refuses it.
 
 What a modified client can still do, all of it accepted for now:
 
 - **Skip the wind-up**, by sending `begin` and `hold` back to back. There is no
   server-side timing floor — see below.
+- **Hold a guard for as long as it likes**, by never sending `end`. There is no
+  maximum duration — see below.
 - **Guard without playing the animation**, so opponents get no visual tell. The
   animation is client-played, and making the server verify it would mean
   trusting a different client-driven signal rather than no longer trusting one.
@@ -518,32 +519,35 @@ direction of "the guard mysteriously does not work for the first few frames."
 Revisit it if parry-skipping turns out to matter; the hook is one comparison in
 `ParryState.isProtectedFrom`, not a redesign.
 
-### `ParryMaxHoldSeconds` bounds a guard's lifetime, and is not that floor
+### A guard has no maximum duration, and that is a gameplay decision
 
-The two are easy to confuse and do opposite things. A floor would say when
-protection *starts*; this says when it *stops*.
+Holding Q guards. It keeps guarding for as long as the key is held — one
+second, twenty seconds, two minutes — and only an explicit release, a death, a
+respawn or a disconnect ends it. `ParryState` reads no clock at all, so there is
+no path out of `active` that the player did not ask for.
 
-It exists because `end` is a message from the client. Everything else that ends
-a parry — death, respawn, disconnect — is observed server-side, but a client
-that simply never sends `end` was, before this, protected across its whole
-front for the entire life of its character, at full speed, with no animation.
-That is not "skipping the wind-up"; that is a standing invulnerable arc, and it
-needed a bound regardless of what was decided about the floor.
+A five-second ceiling was tried and removed. It was introduced to bound a
+modified client that sends `begin` and `hold` and then simply never sends `end`,
+and it did bound that — but it could not tell that client apart from an honest
+one, so it also cut off any player who chose to hold a guard while waiting for
+an opening. A defensive stance that silently stops defending after five seconds
+is a worse game than one that can be exploited, and the exploit it prevented was
+not the expensive part of cheating here anyway.
 
-Five seconds is far longer than any real exchange and short enough to make the
-state worthless to sit in. It is enforced lazily, in
-`ParryState.isExpired`, evaluated when a punch actually arrives — no
-`Heartbeat`, no timer, no per-player scheduling, in a repository where
-`RunService.Heartbeat` needs a justification. `ParryService.isProtectedFrom`
-also clears the expired record as it notices, so an abandoned guard does not sit
-in the table waiting for the character to be replaced.
+**So this is a real, accepted increase in exposure, and it should not be read as
+anything else.** A modified client can now hold a permanent front-facing guard
+for the entire life of its character: it never sends `end`, never plays the
+animation, and never slows down, because none of those three are things the
+server checks. It still cannot widen the arc, cannot cover its back, and cannot
+punch without first releasing the guard — but "front-immune indefinitely" is
+available to anyone willing to modify their client, and no part of this feature
+prevents it.
 
-It has one honest cost: an honest player who holds Q for more than five seconds
-stops being protected while their client still shows the guard, until they
-release and press again. That is a real client/server divergence, and it is
-accepted because holding a guard for five seconds is not a thing the game asks
-anyone to do. It is the reason the constant should not be tuned down towards the
-length of a normal guard.
+What actually closes that gap is making the slowdown real, because the slowdown
+is what a guard is supposed to cost. That means server-authoritative
+`WalkSpeed` — the step the sprinting section above has been pointing at — and it
+is out of scope here. Until then the parry is honest-player infrastructure with
+a server-authoritative *decision*, not a server-enforced *cost*.
 
 ### Never drop a valid transition
 
@@ -598,12 +602,12 @@ remote on a schedule, which this repository does not do. This is the same shape
 of trade as the punch reach above: the server's clock is the truth, and the
 discrepancy gets written down rather than papered over.
 
-Stale state is a different problem from lag, and it is closed from three
-directions. Every way a parry ends other than the key coming up is observed
+Stale state is a different problem from lag, and it is closed for every case
+except one. Each way a parry ends other than the key coming up is observed
 server-side rather than reported: `CharacterRemoving` clears the record on death
-and respawn, and `PlayerRemoving` clears it on disconnect. `ParryMaxHoldSeconds`
-then bounds the one remaining case — a client that stays connected, stays alive,
-and simply never sends `end`.
+and respawn, and `PlayerRemoving` clears it on disconnect. The exception is a
+client that stays connected, stays alive, and simply never sends `end` — nothing
+bounds that, deliberately, for the reasons above.
 
 ## The guard is the forward hemisphere, in the punch's own units
 

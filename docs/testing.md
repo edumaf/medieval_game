@@ -511,23 +511,26 @@ instead; skip steps 2–4 if you have done that.
     Confirm every parry that visibly reaches the Hold pose **actually
     protects** — punch from the front on each one. A guard that animates but
     does not protect means a valid transition is being dropped somewhere, which
-    is the bug `ParryMaxHoldSeconds` and the removal of the transition rate
-    limiter were meant to make impossible.
+    is the bug removing the transition rate limiter was meant to make
+    impossible.
 33. Press Q within the first instant of spawning, before the character has
     finished loading. Confirm you either get a normal parry with a visible
     wind-up, or nothing at all — you must **never** be protected immediately
     with no animation.
 
-**Maximum hold** (`Config.ParryMaxHoldSeconds`, 5s)
+**A guard lasts as long as the key is held**
+
+There is deliberately no maximum duration. These steps exist to catch a
+timeout being reintroduced by accident.
 
 34. Hold Q and keep holding it. Have the other player punch you from the front
-    at 2 seconds. Confirm 0 damage.
-35. Keep holding, and have them punch you from the front again after 6 seconds
-    of continuous holding. Confirm you now take the **normal 25** — the guard
-    has outlived its allowed lifetime. Your client will still be showing the
-    Hold pose; that divergence is expected and documented.
-36. Release Q and press it again. Confirm a fresh guard protects you normally,
-    so the expiry is per-guard and not sticky.
+    at roughly 2 seconds, again at 10 seconds, and again past a full minute of
+    continuous holding. Confirm **0 damage every time** — the guard must not
+    quietly stop working at any point.
+35. Through that same long hold, confirm your speed stays at 8 and you still
+    cannot punch.
+36. Release Q after the long hold. Confirm the pose drops, speed returns to 16,
+    punching works again, and a fresh press of Q guards normally.
 
 **Movement interaction**
 

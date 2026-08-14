@@ -1,7 +1,7 @@
 --!strict
 --[[
-	ParryState — the phases a parry moves through, the geometry a guard is
-	judged by, and the lifetime the server allows it.
+	ParryState — the phases a parry moves through, and the geometry a raised
+	guard is judged by.
 
 	Shared rather than server-only because both sides need the same vocabulary:
 	ParryController drives its own copy to decide what to animate and how fast
@@ -14,13 +14,12 @@
 	hemisphere does not let a modified client widen it — ParryService recomputes
 	the direction from its own view of where both characters are standing.
 
-	Everything here is pure: no instances, no Humanoid, no BasePart, no clock of
-	its own. `Vector3` appears in `attackerDot` because a direction genuinely is
-	a vector and reducing it to plain numbers at the call site would put the
-	subtraction and the normalisation — the two steps most likely to be wrong —
-	back out of reach of a test. It is a datatype, not an instance, so a spec can
-	construct one freely. Times arrive as parameters for the same reason: the
-	caller reads the clock, this module only compares.
+	Everything here is pure: no instances, no Humanoid, no BasePart, no clock.
+	`Vector3` appears in `attackerDot` because a direction genuinely is a vector
+	and reducing it to plain numbers at the call site would put the subtraction
+	and the normalisation — the two steps most likely to be wrong — back out of
+	reach of a test. It is a datatype, not an instance, so a spec can construct
+	one freely.
 ]]
 
 --[[
@@ -33,24 +32,16 @@
 	              already unable to punch, but NOT protected — releasing Q here
 	              must never have granted protection.
 	  active      The animation reached its Hold marker. Protected across the
-	              forward hemisphere until Q is released, or until the guard
-	              outlives the maximum hold below.
+	              forward hemisphere for as long as Q is held.
+
+	There is no fourth, time-based way out of `active`. A guard lasts exactly as
+	long as the player holds the key, however long that is; only an explicit
+	`end` or a lifecycle event (death, respawn, disconnect) returns it to idle.
 ]]
 export type Phase = "idle" | "attempting" | "active"
 
---[[
-	`activatedAt` is the reading of the caller's clock at the moment the guard
-	went up, and is nil in every other phase. It exists so the server can put a
-	ceiling on how long one guard may last without running a timer: the check
-	happens when somebody throws a punch, not on a schedule.
-
-	Both sides carry the field, but only the server's copy is ever compared
-	against a clock — the two realms never share a time base, so a client's
-	`activatedAt` is meaningless to the server and is never sent.
-]]
 export type ParryState = {
 	phase: Phase,
-	activatedAt: number?,
 }
 
 --[[
@@ -66,7 +57,7 @@ local ParryState = {}
 	The state a fresh controller, or a fresh character, starts in.
 ]]
 function ParryState.initial(): ParryState
-	return { phase = "idle", activatedAt = nil }
+	return { phase = "idle" }
 end
 
 --[[
@@ -80,8 +71,7 @@ function ParryState.isTransition(value: any): boolean
 end
 
 --[[
-	The state `transition` leads to from `state`. `now` is the caller's clock,
-	recorded as `activatedAt` when — and only when — this call raises the guard.
+	The state `transition` leads to from `state`.
 
 	Every illegal ordering is a no-op rather than an error, which is what lets
 	ParryService validate a client's message by shape alone and then apply it
@@ -99,24 +89,21 @@ end
 	  * "end" is honoured from every phase. A release must never be the thing
 	    that gets dropped, because that is the one failure that would leave
 	    somebody protected after they let go.
+
+	This function is the complete set of ways a phase can change. Nothing here
+	reads a clock, so an active guard cannot lapse on its own.
 ]]
-function ParryState.apply(state: ParryState, transition: Transition, now: number): ParryState
+function ParryState.apply(state: ParryState, transition: Transition): ParryState
 	if transition == "end" then
-		return { phase = "idle", activatedAt = nil }
+		return { phase = "idle" }
 	end
 
 	if transition == "begin" then
-		if state.phase ~= "idle" then
-			return state
-		end
-		return { phase = "attempting", activatedAt = nil }
+		return if state.phase == "idle" then { phase = "attempting" } else state
 	end
 
 	if transition == "hold" then
-		if state.phase ~= "attempting" then
-			return state
-		end
-		return { phase = "active", activatedAt = now }
+		return if state.phase == "attempting" then { phase = "active" } else state
 	end
 
 	return state
@@ -138,41 +125,9 @@ end
 	starting a parry is never free: a player who taps Q and releases before Hold
 	has spent the wind-up slowed and unable to swing, and got no protection for
 	it.
-
-	Deliberately blind to the maximum hold below. A guard that has outlived its
-	protection is still a guard the player is holding the key for, so it still
-	costs them their punch; what expires is the protection, not the commitment.
 ]]
 function ParryState.isEngaged(state: ParryState): boolean
 	return state.phase ~= "idle"
-end
-
---[[
-	Whether a raised guard has been held longer than the server allows.
-
-	This is a ceiling on one guard's lifetime, and it is emphatically NOT a
-	wind-up timer — it says nothing about when protection begins, only about
-	when it stops. Its reason for existing is that "end" is a message from the
-	client, and a client that simply never sends one would otherwise stay
-	protected for the whole life of its character. Nothing else in the design
-	bounds that.
-
-	Evaluated on demand, against the clock reading the caller supplies, so no
-	timer or Heartbeat connection is needed to enforce it.
-
-	A clock that has gone backwards yields a negative hold, which is treated as
-	not expired — the same direction PunchRules.canPunch errs in, and for the
-	same reason: a bad reading should never silently take away something the
-	player is entitled to.
-]]
-function ParryState.isExpired(state: ParryState, now: number, maxHoldSeconds: number): boolean
-	local activatedAt = state.activatedAt
-	if state.phase ~= "active" or activatedAt == nil then
-		return false
-	end
-
-	local held = now - activatedAt
-	return held >= 0 and held > maxHoldSeconds
 end
 
 --[[
@@ -204,8 +159,7 @@ function ParryState.attackerDot(
 end
 
 --[[
-	Whether a guard is up, still within its allowed lifetime, and facing the
-	direction the attack is arriving from.
+	Whether a guard is up and facing the direction the attack is arriving from.
 
 	`minFacingDot` is a dot product rather than an angle for the same reason
 	Config.PunchMinFacingDot is: it is what the comparison actually needs, and
@@ -220,13 +174,9 @@ end
 function ParryState.isProtectedFrom(
 	state: ParryState,
 	attackerDot: number,
-	minFacingDot: number,
-	now: number,
-	maxHoldSeconds: number
+	minFacingDot: number
 ): boolean
-	return ParryState.isActive(state)
-		and not ParryState.isExpired(state, now, maxHoldSeconds)
-		and attackerDot >= minFacingDot
+	return ParryState.isActive(state) and attackerDot >= minFacingDot
 end
 
 return ParryState
