@@ -172,6 +172,72 @@ local Config = {
 	-- forever — slowed and unable to punch, but never protected — and nothing
 	-- errors. The two values have to be changed together.
 	ParryHoldMarkerName = "Hold",
+
+	--[[
+		The damage/heal/death screen vignette. Drawn entirely by
+		src/client/Controllers/ScreenEffectsController; the rules that turn a
+		health change into one of these are in its ScreenEffectState.
+
+		Purely cosmetic, and shared config only because that is where this
+		project keeps its tunable numbers. Nothing on the server reads any of
+		them, and nothing a player could learn from them is worth hiding — the
+		vignette reports health the player can already see on their own health
+		bar.
+	]]
+
+	-- The three colours the vignette is tinted with. Damage and death are both
+	-- red so they read as the same language, with death darker and far
+	-- stronger; healing is green so it cannot be mistaken for either.
+	ScreenEffectDamageColor = Color3.fromRGB(150, 15, 15),
+	ScreenEffectHealColor = Color3.fromRGB(40, 175, 65),
+	ScreenEffectDeathColor = Color3.fromRGB(110, 0, 0),
+
+	-- Peak opacity at the screen edge for a health change, as a fraction of
+	-- the health bar that moved: losing everything reaches the maximum, and
+	-- the smallest change still reaches the minimum so a scratch is visible
+	-- rather than invisible.
+	--
+	-- The maximum is deliberately below the death intensity below. Dying has
+	-- to be unmistakably stronger than being hit hard, and that is only true
+	-- while these two stay ordered.
+	ScreenEffectMinIntensity = 0.25,
+	ScreenEffectMaxIntensity = 0.75,
+	ScreenEffectDeathIntensity = 1,
+
+	-- Health changes smaller than this are not drawn at all. Roblox's own
+	-- passive regeneration moves a Humanoid by roughly a tenth of a point at a
+	-- time, and HealthService snaps each of those back to its authoritative
+	-- value (see docs/decisions.md), so both edges of that correction reach
+	-- the client as health changes. Without a floor the screen would flicker
+	-- red and green while nothing was happening.
+	ScreenEffectMinHealthChange = 1,
+
+	-- How far in from each screen edge the vignette reaches, as a fraction of
+	-- the screen. The four bands are drawn one per edge and fade to nothing
+	-- towards the middle, so the centre stays clear at the resting reach; at
+	-- 0.5 opposite bands meet and the whole screen is covered.
+	--
+	-- The death reach is what makes dying expand towards the centre rather
+	-- than merely darken, so it must stay above the resting one.
+	ScreenEffectEdgeReach = 0.22,
+	ScreenEffectDeathEdgeReach = 0.45,
+
+	-- How long a health-change vignette takes to reach its peak and then fade
+	-- away again. The rise is short because the point of it is to tell the
+	-- player they were hit at the moment they were hit.
+	ScreenEffectRiseSeconds = 0.06,
+	ScreenEffectFadeSeconds = 0.45,
+
+	-- Death takes far longer, and does not fade on its own: it grows from the
+	-- edges to its peak over this long and then stays there until the player
+	-- respawns. That slow spread is the whole difference between dying and
+	-- being hit.
+	ScreenEffectDeathRiseSeconds = 1.2,
+
+	-- How long the vignette takes to disappear when a new character arrives.
+	-- Short, but not instant — a death vignette that vanished on one frame
+	-- would read as a glitch rather than as respawning.
+	ScreenEffectClearSeconds = 0.3,
 }
 
 return table.freeze(Config)

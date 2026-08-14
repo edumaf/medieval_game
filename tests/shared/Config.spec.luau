@@ -95,6 +95,46 @@ describe("Shared.Config", function()
 		expect(Config.ParryMinFacingDot <= 1).toBe(true)
 	end)
 
+	it("keeps dying visibly stronger than any hit can be", function()
+		-- ScreenEffectsController scales a hit between the two intensities and
+		-- draws a death at the third. If an ordinary hit could reach the death
+		-- intensity, the two effects would stop being distinguishable, which is
+		-- the one thing the death vignette exists to be.
+		expect(Config.ScreenEffectMinIntensity > 0).toBe(true)
+		expect(Config.ScreenEffectMinIntensity < Config.ScreenEffectMaxIntensity).toBe(true)
+		expect(Config.ScreenEffectMaxIntensity < Config.ScreenEffectDeathIntensity).toBe(true)
+		expect(Config.ScreenEffectDeathIntensity <= 1).toBe(true)
+	end)
+
+	it("leaves the middle of the screen clear until the player dies", function()
+		-- The four bands meet at half the screen. A resting reach at or above
+		-- that would cover the centre during ordinary combat; a death reach at
+		-- or below the resting one would make dying darken the edges rather
+		-- than spread inwards.
+		expect(Config.ScreenEffectEdgeReach > 0).toBe(true)
+		expect(Config.ScreenEffectEdgeReach < 0.5).toBe(true)
+		expect(Config.ScreenEffectEdgeReach < Config.ScreenEffectDeathEdgeReach).toBe(true)
+		expect(Config.ScreenEffectDeathEdgeReach <= 0.5).toBe(true)
+	end)
+
+	it("draws a hit quickly and a death slowly", function()
+		-- A hit has to register at the moment it lands, so its rise is much
+		-- shorter than its fade. A death is the opposite: the slow spread is
+		-- what makes it read as dying rather than as being hit hard.
+		expect(Config.ScreenEffectRiseSeconds > 0).toBe(true)
+		expect(Config.ScreenEffectRiseSeconds < Config.ScreenEffectFadeSeconds).toBe(true)
+		expect(Config.ScreenEffectFadeSeconds < Config.ScreenEffectDeathRiseSeconds).toBe(true)
+		expect(Config.ScreenEffectClearSeconds > 0).toBe(true)
+	end)
+
+	it("ignores health changes too small to be worth a flash", function()
+		-- Zero would let Roblox's passive regeneration, and HealthService
+		-- snapping it back, flicker the screen. Anything as large as a punch
+		-- would drop hits that should be drawn.
+		expect(Config.ScreenEffectMinHealthChange > 0).toBe(true)
+		expect(Config.ScreenEffectMinHealthChange < Config.PunchDamage).toBe(true)
+	end)
+
 	it("keeps sprinting faster than walking, and walking faster than guarding", function()
 		-- The precedence RunningController applies, asserted as an ordering so
 		-- retuning any one of the three cannot silently invert it. A parry speed

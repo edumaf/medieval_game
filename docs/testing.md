@@ -37,6 +37,8 @@ tests/
       SprintState.spec.luau
     HealthBarController/
       HealthDisplay.spec.luau
+    ScreenEffectsController/
+      ScreenEffectState.spec.luau
 ```
 
 Rojo maps `tests/` to `ServerScriptService.Tests`, and only in
@@ -554,3 +556,81 @@ timeout being reintroduced by accident.
 42. Check Output for errors or warnings throughout. Malformed parry payloads are
     dropped silently by design, so nothing should appear there during honest
     play at all.
+
+## Manual verification: Screen effects
+
+`ScreenEffectState` covers the rules — which vignette a health change deserves,
+how strong it is, and which of two effects wins — in
+`tests/client/ScreenEffectsController/ScreenEffectState.spec.luau`. What no unit
+test can cover is what it actually looks like, whether the tween is smooth, and
+whether the bindings survive a respawn. That is all by eye.
+
+Solo **Play** is enough for most of this, using `/damage` and `/heal` from the
+Health section above. Steps 15–18 need a second player.
+
+**Taking damage**
+
+1. `/damage 5`. Confirm a red vignette appears around the edges of the screen
+   almost immediately and fades away smoothly over about half a second.
+2. Confirm the middle of the screen stays clear throughout — you must be able
+   to read the health bar and see what is in front of you the whole time.
+3. `/damage 50`. Confirm the red is clearly stronger than it was for 5.
+4. `/damage 40` from full health. Confirm it is stronger again. The three
+   should be visibly ordered, not merely different.
+5. Confirm the vignette is behind the health bar, not over it.
+
+**Taking healing**
+
+6. `/damage 80`, then `/heal 5`. Confirm a *green* vignette, subtle, same shape
+   as the red one.
+7. `/heal 60`. Confirm it is clearly stronger, and unmistakably green.
+8. Confirm nothing green appears at spawn. Arriving at full health is not a
+   heal, and a flash on join means the first health reading was treated as a
+   change.
+
+**Rapid changes**
+
+9. `/damage 10` five times as fast as you can type. Confirm the effect stays at
+   roughly one hit's strength rather than climbing to a solid red screen, and
+   that it never flickers or snaps.
+10. `/damage 60`, then `/damage 5` immediately. Confirm the screen does not
+    visibly *drop* when the small hit lands — the stronger peak is held.
+11. `/damage 60`, then `/heal 40` immediately. Confirm the red is replaced by
+    green cleanly, with no flicker and no red left underneath.
+12. `/heal 40`, then `/damage 60` immediately. Confirm the reverse works too.
+13. Stand still at partial health for a full minute without typing anything.
+    Confirm the screen stays completely clear — any slow red/green flicker here
+    means `Config.ScreenEffectMinHealthChange` is too low for whatever is
+    moving the Humanoid.
+
+**Dying**
+
+14. `/damage 500` from full health. Confirm:
+    - the red is much stronger than any `/damage` vignette,
+    - it *spreads inwards* from the edges over about a second rather than
+      appearing at full size,
+    - it covers most of the screen at its peak,
+    - it then holds, rather than fading, until you respawn.
+15. Repeat, and have a second player `/damage` you again while you are dead.
+    Confirm the death vignette does not flinch — no extra flash, no fade.
+16. Repeat, and have them `/heal` you while you are dead. Confirm nothing green
+    appears.
+17. Die by punches from another player rather than by chat command. Confirm the
+    death effect starts on the killing blow, not a moment late and not twice.
+
+**Respawn**
+
+18. Respawn after a death. Confirm the screen clears smoothly over about a third
+    of a second and is completely clear once you are up.
+19. Take damage on the new character. Confirm the red vignette still plays — an
+    effect that stops working after your first death means the Humanoid
+    connections were not re-bound.
+20. Die and respawn five times, then `/damage 10` **once**. Confirm you get one
+    vignette at one hit's strength. An effect that gets stronger, or plays
+    twice, the more you have died means `CharacterAdded` is stacking
+    connections instead of replacing them.
+21. Reset (Esc → Reset Character) mid-fade, while a red vignette is still on
+    screen. Confirm the new character comes up with a clear screen.
+22. Leave and rejoin the server. Confirm you spawn with a clear screen.
+23. Check Output for errors or warnings throughout — a character being removed
+    while an effect is playing must produce nothing at all.

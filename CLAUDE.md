@@ -22,6 +22,7 @@ having no gameplay, and do not rebuild what is listed below.
 | Punch combat (left click) | `CombatService` | `PunchController` | `Shared/Combat/PunchRules` |
 | Parry (hold Q) | `ParryService` | `ParryController` | `Shared/Combat/ParryState` |
 | Sprint (hold Shift) | — client-only | `RunningController/` | `SprintState` |
+| Damage/heal/death vignette | — client-only | `ScreenEffectsController/` | `ScreenEffectState` |
 | Boot handshake | `SessionService` | `SessionController` | — |
 
 Combat specifics that are easy to break:

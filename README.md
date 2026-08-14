@@ -88,6 +88,7 @@ Enough to fight someone. Not enough to call it a game yet.
 | **Punch combat** | `CombatService` + `PunchController` + `PunchRules` | Left click, animated swing, server decides who was hit |
 | **Parry** | `ParryService` + `ParryController` + `ParryState` | Hold Q, animated guard, server decides whether it stopped the punch |
 | **Sprinting** | `RunningController` + `SprintState` | Hold Shift, client-side (see `docs/decisions.md` for why) |
+| **Screen effects** | `ScreenEffectsController` + `ScreenEffectState` | Red vignette when hit, green when healed, a stronger spreading red on death |
 | **Session** | `SessionService` + `SessionController` | Boot handshake, detects a client on a stale build |
 
 Everything a player could profit from lying about — health, damage, who got hit
@@ -176,6 +177,7 @@ src/
       HealthBarController/ drives the Studio-authored health bar
       PunchController      left click, swing animation, Hit marker
       RunningController/   hold Shift to sprint
+      ScreenEffectsController/ damage, heal and death screen vignette
       SessionController    the client half of the handshake
   client.project.json  → (scopes StarterPlayerScripts.Client to a LocalScript)
 

@@ -711,3 +711,85 @@ slowed and cannot punch, and never becomes protected, with nothing in Output to
 say why. That is why the marker name sits in `Config` next to the asset id, and
 why `Config.spec.luau` asserts both are well-formed. Neither check can prove the
 marker exists inside the published asset — only Studio can.
+
+## Screen effects read the Humanoid, and add no remote
+
+`ScreenEffectsController` draws the damage, healing and death vignette from
+`Humanoid.HealthChanged` and `Humanoid.Died` on the local character. It adds no
+entry to `Remotes.luau` and touches no server file.
+
+The channel already exists and is already documented. `HealthService` owns the
+authoritative number and mirrors it onto `Humanoid.Health`/`MaxHealth`, Humanoid
+properties replicate server → client on their own, and `HealthBarController`
+has been reading exactly this since the health bar landed — for the reason
+given there: a display-only system that shows a player their own health has
+nothing worth lying to. A `HealthChangedEvent` remote would be a second copy of
+a channel that already works, and a second thing to keep in step with the
+mirror, in exchange for nothing. Each entry in `Remotes.luau` is a hole in the
+boundary somebody has to defend; this feature does not need one.
+
+Nothing about authority moves. `HealthService.takeDamage`/`heal` remain the only
+writers, `CombatService` remains the only caller in combat, and a modified
+client that forces its own `Humanoid.Health` still only changes the colour of
+its own screen — the same cosmetic gap the health mirror section above already
+describes and deliberately leaves open.
+
+### Death is bound twice on purpose
+
+The vignette is triggered both by `Humanoid.Died` and by health reaching zero
+inside `ScreenEffectState.forHealthChange`. That is not a duplicate: Roblox does
+not promise which of the two the client sees first, and a killing blow that drew
+an ordinary red flash before the death caught up would read as a stutter.
+Whichever arrives first plays the death; the other finds a death already showing
+and `withEffect` returns the state untouched, so it plays exactly once either
+way.
+
+### The vignette is built in code, not in `StarterGui`
+
+This is the one screen in the game that `docs/ui-workflow.md` does not apply to,
+and it is worth saying why rather than leaving it to look like an oversight.
+
+That rule exists so the designer owns layout. This has none to own: four
+full-bleed bands pinned to the four screen edges, no position, no text, no
+styling, and a size that is animated every frame from `Config`. There is nothing
+for a designer to place, and a `StarterGui` copy would only be a set of instances
+they must not touch. Building it in `StarterGui` would also make the feature
+inert until the place file caught up, for no benefit — the health bar has a real
+layout and correctly lives there; this does not.
+
+Everything anybody would actually retune — the three colours, both reaches, all
+four durations, the intensity range — is in `Config`, not baked into the
+controller. If the effect ever grows a border, an icon, or anything with a
+position, that is the signal to move it into `StarterGui` and drive it by name
+like `HealthBar`.
+
+### Four gradient bands rather than one vignette texture
+
+An `ImageLabel` with a radial vignette texture is the usual way to do this, and
+it would be a reasonable swap later. It is not what shipped, because it needs an
+uploaded image asset: `assets/images/` is empty, and an unpublished or wrong
+`rbxassetid://` fails silently — exactly the failure mode the punch and parry
+animations already document, except that here it would leave the feature
+invisible with nothing in Output.
+
+Four `Frame`s with a `UIGradient` each need no asset at all, and they buy the
+expanding death effect for free: the spread towards the centre is each band's
+`Size` growing, which a single fixed texture cannot do without a second texture
+or a scale trick. The cost is four instances instead of one, all of them inert
+(`Active = false`, so none of them can swallow the click that throws a punch).
+
+### One tween, driven through a `NumberValue`
+
+Every visible property is derived from a single 0-to-1 `Level` value, and only
+that value is ever tweened. Tweening the bands directly would mean eight tweens
+— four transparencies and four sizes — that a second hit mid-fade could leave
+half-replaced, which is the "old effects fighting new ones" failure this feature
+has to avoid.
+
+With one driver there is exactly one tween at a time. A new effect cancels the
+previous one and rises from wherever the level had got to, so repeated damage
+lifts the vignette back up instead of restarting it from black. `Cancel()` alone
+is not quite enough, because the fade a hit queues is started from the rise's
+`Completed` handler: a generation counter makes a handler belonging to a
+replaced tween do nothing, so a stale fade can never start on top of a newer
+effect.
