@@ -76,8 +76,8 @@ Enough to fight someone. Not enough to call it a game yet.
 | Input | Does |
 | --- | --- |
 | **Left click** | Throw a punch — 25 damage, ~4.5 studs, 120° cone in front of you |
-| **Left Shift** (hold) | Sprint (16 → 24 walkspeed) |
-| **Q** (hold) | Parry — blocks punches from your front half, slows you to 8 walkspeed |
+| **Left Shift** (hold) | Sprint (16 → 24 walkspeed) — costs stamina while you are moving |
+| **Q** (hold) | Parry — blocks punches from your front half, slows you to 8 walkspeed, costs stamina |
 | `/damage <n>`, `/heal <n>` | Developer-only test commands (see [Testing](#testing)) |
 
 ### Systems
@@ -87,7 +87,8 @@ Enough to fight someone. Not enough to call it a game yet.
 | **Health** | `HealthService` + `HealthBarController` | 100 HP, server-authoritative, on-screen bar, death and respawn |
 | **Punch combat** | `CombatService` + `PunchController` + `PunchRules` | Left click, animated swing, server decides who was hit |
 | **Parry** | `ParryService` + `ParryController` + `ParryState` | Hold Q, animated guard, server decides whether it stopped the punch |
-| **Sprinting** | `RunningController` + `SprintState` | Hold Shift, client-side (see `docs/decisions.md` for why) |
+| **Sprinting** | `RunningController` + `SprintState` | Hold Shift; the speed is applied client-side, the intent is reported to the server (see `docs/decisions.md`) |
+| **Stamina** | `StaminaService` + `StaminaState` + `StaminaController` + `StaminaBarController` | 100-point pool, server-authoritative, spent by sprinting, parrying and punching, on-screen bar |
 | **Screen effects** | `ScreenEffectsController` + `ScreenEffectState` | Red vignette when hit, green when healed, a stronger spreading red on death |
 | **Combat & health audio** | `Shared/Util/Audio` + the systems that own each event | Punch swing fitted to the animation, impact from the target's root part, damage/heal stings on the vignette's own envelope |
 | **Session** | `SessionService` + `SessionController` | Boot handshake, detects a client on a stale build |
@@ -114,14 +115,19 @@ of where everyone is standing.
   protected, with nothing in Output to say so.
 - **Parry is directional.** It stops punches from your front half only. Getting
   hit from behind while guarding is working as intended.
+- **Stamina is the server's, and it is spent by all three.** Sprinting and
+  guarding drain it continuously, every swing costs a fixed amount, and it
+  refills when you are doing none of them. On an empty pool you cannot guard at
+  all, and your punches deal 30% of their damage — they still land, they just
+  stop hurting.
 - **All the numbers are in `src/shared/Config.luau`** — damage, reach, cooldown,
-  cone angle, sprint speed, parry speed, parry arc, lag allowance. Tune there,
-  not in Studio.
+  cone angle, sprint speed, parry speed, parry arc, lag allowance, and every
+  stamina rate and cost. Tune there, not in Studio.
 
 ### Not built yet
 
-Stamina, weapons, inventory, quests, NPCs, enemies, progression, currency,
-player data persistence, and the map itself.
+Weapons, inventory, quests, NPCs, enemies, progression, currency, player data
+persistence, and the map itself.
 
 ## Development philosophy
 

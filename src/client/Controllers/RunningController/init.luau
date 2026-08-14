@@ -7,16 +7,35 @@
 	setting WalkSpeed itself, so the two systems cannot fight over the property.
 	See SprintState for why both intents live in one state.
 
-	Client-only, no remote involved: Humanoid.WalkSpeed is a replicated
-	property and a player's own character is client-network-owned by default,
-	so setting it locally already reaches the server and other clients. There
-	is currently nothing (stamina, combat, speed-gated rewards) a modified
-	client could gain by lying about its speed -- see docs/decisions.md for
-	when that stops being true and this needs server validation.
+	The speed itself is still applied locally: Humanoid.WalkSpeed is a replicated
+	property and a player's own character is client-network-owned by default, so
+	setting it here already reaches the server and other clients.
 
-	Input connections and the CharacterAdded connection are made once, in
-	Start(). Respawning only swaps the Humanoid reference; it never
-	reconnects anything, so there is nothing to leak or duplicate.
+	What has changed is that something now cares. Stamina is charged for
+	sprinting, and it is charged on the server, so this controller reports its
+	sprint intent over SprintStateRequest -- one boolean, on the frame it
+	changes, never on a schedule and never per frame. It reports; it does not
+	decide. Nothing is sent about how much stamina to spend, because the server
+	drains the pool from its own clock and would ignore a number from here
+	anyway. See docs/decisions.md for what this does and does not close.
+
+	Running the pool empty takes the sprint away until it has recovered. The
+	rule is StaminaState.sprintLocked and the pool is the server's, arriving
+	here through StaminaController -- this controller evaluates a shared
+	predicate against a server-owned number and applies the result to the
+	property it already owns. It does not decide when a player is exhausted any
+	more than it decides how much stamina a sprint costs.
+
+	The boolean reported over the remote is therefore whether the player is
+	*sprinting*, not whether Shift is down. That distinction is what lets the
+	pool refill under a held key: the server regenerates a player it cannot see
+	sprinting, so a client that kept reporting a held key at zero would pin its
+	own pool there and never recover.
+
+	Input connections, the CharacterAdded connection and the stamina
+	subscription are made once, in Start(). Respawning only swaps the Humanoid
+	reference and re-states the intent; it never reconnects anything, so there
+	is nothing to leak or duplicate.
 ]]
 
 local Players = game:GetService("Players")
@@ -26,6 +45,10 @@ local UserInputService = game:GetService("UserInputService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
 local Logger = require(Shared.Util.Logger)
+local Net = require(Shared.Net)
+local StaminaState = require(Shared.Stamina.StaminaState)
+
+local StaminaController = require(script.Parent.StaminaController)
 
 local SprintState = require(script.SprintState)
 
@@ -36,6 +59,43 @@ local RunningController = {}
 local player = Players.LocalPlayer
 local humanoid: Humanoid? = nil
 local state = SprintState.initial()
+
+local sprintRequest: RemoteEvent? = nil
+
+-- What the server was last told. Sending only on a change is what keeps a held
+-- key down to two messages -- one on press, one on release -- rather than a
+-- stream of them for as long as the player is running.
+local lastSentSprinting: boolean? = nil
+
+--[[
+	Tells the server whether the player is sprinting, if that has changed since
+	the last time it was told.
+
+	`force` re-states it regardless, which a respawn does: the intent survives a
+	death here (holding Shift through one keeps sprinting), so the new character
+	starts draining stamina for a key that was pressed before it existed, and a
+	single message on spawn is cheaper than the two realms quietly disagreeing
+	about it.
+
+	The lockout is part of what is reported, so exhaustion costs one message and
+	recovery costs one more -- the same two-messages-per-state-change budget a
+	held key already had, rather than a stream while the pool refills.
+]]
+local function sendSprintIntent(force: boolean)
+	local remote = sprintRequest
+	if remote == nil then
+		return
+	end
+
+	local sprinting = SprintState.isSprinting(state)
+
+	if not force and lastSentSprinting == sprinting then
+		return
+	end
+
+	lastSentSprinting = sprinting
+	remote:FireServer(sprinting)
+end
 
 --[[
 	Applies the current sprint-intent state to whichever Humanoid is active
@@ -52,6 +112,35 @@ local function applyWalkSpeed()
 		Config.SprintWalkSpeed,
 		Config.ParryWalkSpeed
 	)
+end
+
+--[[
+	Re-evaluates the stamina lockout against the pool the server last sent, and
+	applies it if it has moved.
+
+	Called on every StaminaChanged, which is at most a handful a second and
+	never per frame. The early return keeps that down to real work only on the
+	two transitions that matter -- becoming exhausted, and recovering -- so the
+	steady drain in between costs a comparison.
+
+	The latch lives in `state` rather than here: StaminaState.sprintLocked is
+	pure and takes the previous answer, exactly as StaminaState.shouldReplicate
+	takes the last value sent.
+]]
+local function refreshStaminaLock()
+	local locked = StaminaState.sprintLocked(
+		StaminaController.getState(),
+		state.staminaLocked,
+		Config.SprintRecoveryStaminaFraction
+	)
+
+	if locked == state.staminaLocked then
+		return
+	end
+
+	state = SprintState.withStaminaLocked(state, locked)
+	applyWalkSpeed()
+	sendSprintIntent(false)
 end
 
 --[[
@@ -80,6 +169,7 @@ end
 local function onCharacterAdded(character: Model)
 	humanoid = character:WaitForChild("Humanoid") :: Humanoid
 	applyWalkSpeed()
+	sendSprintIntent(true)
 end
 
 local function onInputBegan(input: InputObject, gameProcessedEvent: boolean)
@@ -88,6 +178,7 @@ local function onInputBegan(input: InputObject, gameProcessedEvent: boolean)
 	end
 	state = SprintState.withInputBegan(state)
 	applyWalkSpeed()
+	sendSprintIntent(false)
 end
 
 -- Deliberately does not check gameProcessedEvent: if it did, releasing Shift
@@ -99,13 +190,34 @@ local function onInputEnded(input: InputObject, _gameProcessedEvent: boolean)
 	end
 	state = SprintState.withInputEnded(state)
 	applyWalkSpeed()
+	sendSprintIntent(false)
 end
 
 function RunningController.Start()
+	-- Yields until the remote replicates, which is why this is Start and not
+	-- Init. Until it returns, sendSprintIntent is a no-op and the speed still
+	-- applies locally -- the player sprints, and the server starts charging for
+	-- it a moment later.
+	sprintRequest = Net.getEvent("SprintStateRequest")
+
 	player.CharacterAdded:Connect(onCharacterAdded)
 	if player.Character then
 		onCharacterAdded(player.Character)
 	end
+
+	-- An empty pool takes the sprint away, and recovering to
+	-- Config.SprintRecoveryStaminaFraction gives it back. Both arrive here as an
+	-- ordinary stamina update: the server sends both ends of the pool exactly
+	-- (StaminaState.shouldReplicate), so the transition to zero is never a value
+	-- this client had to approximate.
+	StaminaController.onChanged(refreshStaminaLock)
+
+	-- StaminaController assumes a full pool until the server says otherwise, so
+	-- this normally changes nothing. It matters when a StaminaChanged has
+	-- already landed before this controller subscribed -- both Start()s run in
+	-- their own thread -- in which case the lockout would otherwise wait for the
+	-- next update to notice.
+	refreshStaminaLock()
 
 	UserInputService.InputBegan:Connect(onInputBegan)
 	UserInputService.InputEnded:Connect(onInputEnded)

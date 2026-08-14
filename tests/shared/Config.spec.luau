@@ -203,6 +203,80 @@ describe("Shared.Config", function()
 		expect(Config.PunchSwingFadeSeconds < Config.PunchCooldownSeconds).toBe(true)
 	end)
 
+	it("ships a stamina pool with room in it", function()
+		-- Everything else in the stamina system divides by this or clamps to it.
+		expect(Config.MaxStamina > 0).toBe(true)
+	end)
+
+	it("spends stamina in the three ways the system charges for", function()
+		-- Any of these at zero silently switches off the cost of an action
+		-- without switching off the feature, which is the kind of retune that
+		-- reads as "stamina is broken" rather than as a number being wrong.
+		expect(Config.SprintStaminaDrainPerSecond > 0).toBe(true)
+		expect(Config.ParryStaminaDrainPerSecond > 0).toBe(true)
+		expect(Config.PunchStaminaCost > 0).toBe(true)
+	end)
+
+	it("regenerates, and leaves a full pool worth more than one punch", function()
+		expect(Config.StaminaRegenPerSecond > 0).toBe(true)
+		-- A pool that cannot cover a single swing would mean every punch after
+		-- the first landed at the reduced multiplier, which is not a difficulty
+		-- setting, it is the feature never being off.
+		expect(Config.PunchStaminaCost < Config.MaxStamina).toBe(true)
+	end)
+
+	it("weakens an exhausted punch without erasing or strengthening it", function()
+		-- At 0 the punch would deal nothing and read as a broken hit; at or above
+		-- 1 running out of stamina would be free or an upgrade.
+		expect(Config.ZeroStaminaPunchDamageMultiplier > 0).toBe(true)
+		expect(Config.ZeroStaminaPunchDamageMultiplier < 1).toBe(true)
+	end)
+
+	it("makes an exhausted sprinter wait for a real fraction of the pool", function()
+		-- At or below 0 the lockout would release on the first tick of
+		-- regeneration and the player would judder between walking and sprinting
+		-- ten times a second, which is the failure the second threshold exists to
+		-- prevent. At or above 1 only a completely full pool would ever release
+		-- it, which turns a short exhaustion into the whole regeneration.
+		expect(Config.SprintRecoveryStaminaFraction > 0).toBe(true)
+		expect(Config.SprintRecoveryStaminaFraction < 1).toBe(true)
+	end)
+
+	it("buys back more sprint than the recovery costs to reach", function()
+		-- The exhaustion has to be a rhythm rather than a tax: recovering to the
+		-- threshold and spending it again should leave the player sprinting for a
+		-- usable stretch, not for a step. Both sides are derived from the shipped
+		-- rates, so retuning either drain or regen re-checks this.
+		local recovered = Config.MaxStamina * Config.SprintRecoveryStaminaFraction
+		local sprintSeconds = recovered / Config.SprintStaminaDrainPerSecond
+
+		expect(sprintSeconds >= 1).toBe(true)
+	end)
+
+	it("ticks stamina often enough to be a bar rather than a counter", function()
+		-- The pool is integrated against real elapsed time, so this only decides
+		-- how often the number moves. A quarter of a second is where a drain
+		-- would start to look stepped even after the client smooths it.
+		expect(Config.StaminaTickIntervalSeconds > 0).toBe(true)
+		expect(Config.StaminaTickIntervalSeconds <= 0.25).toBe(true)
+	end)
+
+	it("replicates stamina in steps that are neither per-frame nor per-quarter", function()
+		-- At or below 0 every tick would send a message, which is the per-frame
+		-- spam this threshold exists to prevent; above a quarter of the pool the
+		-- bar would visibly jump between updates.
+		expect(Config.StaminaReplicationStepFraction > 0).toBe(true)
+		expect(Config.StaminaReplicationStepFraction <= 0.25).toBe(true)
+	end)
+
+	it("counts a sprint as moving at less than a walk", function()
+		-- The threshold only rules out standing still. Set anywhere near the
+		-- walking speed it would stop charging for real sprints -- including
+		-- every one made uphill or against a wall.
+		expect(Config.StaminaSprintMinMoveSpeed > 0).toBe(true)
+		expect(Config.StaminaSprintMinMoveSpeed < Config.NormalWalkSpeed).toBe(true)
+	end)
+
 	it("keeps sprinting faster than walking, and walking faster than guarding", function()
 		-- The precedence RunningController applies, asserted as an ordering so
 		-- retuning any one of the three cannot silently invert it. A parry speed

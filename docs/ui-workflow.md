@@ -55,6 +55,42 @@ controller exists, treat it as a contract and mention renames in the PR.
 - Do not put LocalScripts inside a ScreenGui. Rojo does not manage `StarterGui`,
   so any script you leave there is invisible to Git, to review and to CI.
 
+## The screens that exist, and what their controllers expect
+
+Both of these are contracts. Renaming anything in them breaks the controller
+exactly like renaming a function would, and the controller says so by name in
+Output rather than erroring.
+
+**`HealthBar`** — driven by `HealthBarController`:
+
+```
+HealthBar (ScreenGui)     ResetOnSpawn = false, ships Enabled = false
+  Bar (Frame)
+    Track (Frame)
+      Fill (Frame)        Size driven from health/maxHealth
+    Amount (TextLabel)    Text driven, as "current/max"
+```
+
+**`StaminaBar`** — driven by `StaminaBarController`:
+
+```
+StaminaBar (ScreenGui)    ResetOnSpawn = false, ships Enabled = false
+  Bar (Frame)
+    Track (Frame)         ClipsDescendants = true
+      Fill (Frame)        Size driven from current/max stamina
+```
+
+Deliberately no `Amount` label on the stamina bar: stamina reads as a bar, not
+as a number. `Fill` is sized as `UDim2.fromScale(fraction, 1)`, so it has to be
+anchored to the left edge of `Track` — `AnchorPoint` `(0, 0.5)` with `Position`
+`(0, 0, 0.5, 0)` — and its `Size` must not be offset-based, since the controller
+overwrites it. Style, colour, corner radius and where on screen it sits are all
+yours; the four names and that one anchoring rule are all the code depends on.
+
+The controller turns `StaminaBar.Enabled` on whenever stamina is below full and
+off again when it returns to full, so the bar is invisible for a player who has
+spent nothing. Ship it disabled, as with every other screen.
+
 ## When the designer needs a value from code
 
 Ask for it rather than guessing. The controller sets it:

@@ -200,6 +200,15 @@ Humanoid or input device, so they are pure Jest unit tests rather than a
 Studio play-test. The actual key handling and `Humanoid.WalkSpeed` effect can
 only be verified by hand in Studio.
 
+### Half-superseded: stamina is the system that started caring
+
+Stamina landed, so the condition above has been met, and the first half of what
+this section prescribed is now done: `RunningController` reports its sprint
+intent over `SprintStateRequest` and `StaminaService` charges for it. The second
+half — clamping or rejecting a `Humanoid.WalkSpeed` the server did not expect —
+is deliberately still not done. See "Stamina is the server's, the sprint key is
+finally reported to it" below for what that costs.
+
 ## Health (`HealthService`) keeps its own state and mirrors it onto Humanoid
 
 Unlike sprinting, health is server-authoritative from the first version, and
@@ -711,6 +720,269 @@ slowed and cannot punch, and never becomes protected, with nothing in Output to
 say why. That is why the marker name sits in `Config` next to the asset id, and
 why `Config.spec.luau` asserts both are well-formed. Neither check can prove the
 marker exists inside the published asset — only Studio can.
+
+## Stamina is the server's, the sprint key is finally reported to it
+
+`StaminaService` keeps the pool in a module-local table keyed by `Player`,
+exactly as `HealthService` keeps health, and for the same reason: there is no
+Roblox property for "stamina" that could be the source of truth, and if there
+were, a client-network-owned character would be able to write to it. Nothing
+travels towards the server carrying a stamina number, and nothing should ever be
+added that does. `StaminaChanged` runs server → client only.
+
+The one thing the client contributes is whether it is holding the sprint key,
+over `SprintStateRequest`, as a single boolean sent on the frame it changes.
+That is the remote the sprinting section above has been pointing at since before
+combat existed.
+
+### A boolean, not a phase vocabulary
+
+`ParryStateRequest` carries `"begin" | "hold" | "end"` because a parry has three
+phases and the wind-up matters. A sprint has two states and no wind-up, so the
+payload is the state itself and the validation is `type(sprinting) == "boolean"`
+— a type check that is also a complete range check, since a boolean has no
+values outside its type. Inventing a two-string vocabulary to match the parry's
+shape would have added a module and an `isTransition` for no gain.
+
+### What the server does and does not know about sprinting
+
+`StaminaService` charges the sprint drain when **either** the client declared
+the intent **or** the server can see `Humanoid.WalkSpeed` above
+`Config.NormalWalkSpeed` on a character that declared nothing — and, either way,
+only while the root part is actually travelling at
+`Config.StaminaSprintMinMoveSpeed` or more along the ground.
+
+The second signal is there because the first one is optional from a modified
+client's point of view: the obvious way to sprint for free is to set your own
+`WalkSpeed` and simply never send `true`. Reading the speed the server already
+receives closes that, for two lines, without the server writing the property.
+
+It closes it against the lazy version and not against a determined one, and it
+is worth being blunt about why: both signals are client-owned. A player's
+character is client-network-owned, so the key press, the `WalkSpeed` and the
+velocity are all things the client reports rather than things this server
+observes independently. Somebody willing to move their character by other means
+at a declared `WalkSpeed` of 16 pays nothing. **This raises the cost of
+sprinting for free; it does not prevent it.**
+
+The ground-speed floor is not an anti-cheat measure at all — it is there so
+holding Shift while stood still, or pressed into a wall, does not drain a pool
+for a sprint that is not happening. Falling is excluded for the same reason,
+which is why it is the horizontal components and not the whole velocity.
+
+### Why not make `WalkSpeed` server-authoritative here
+
+That is the real fix, it is what the sprinting section prescribes, and it would
+close the parry's "guard at full speed" gap in the same stroke — the server
+already holds both inputs it would need (the sprint intent, now, and the parry
+phase, since `ParryService`), so it could compute the expected speed and snap
+`Humanoid.WalkSpeed` back to it exactly the way `HealthService` snaps
+`Humanoid.Health` back.
+
+It is still not done, on purpose. It is a movement change, not a stamina one:
+every existing note about `RunningController` being the only writer of
+`WalkSpeed` would have to be revisited, `SprintState`'s precedence rules would
+move server-side, and the feature this branch is actually delivering would be
+reviewed as an appendix to a movement refactor. The same reasoning kept it out
+of the parry, and it applies here for the last time — the next feature that
+needs it should do it on its own branch, with nothing else in the diff.
+
+## One loop, one pool, and updates only when they mean something
+
+There is exactly one `RunService.Heartbeat` connection for stamina in the entire
+server, made once in `StaminaService.Start()`. Not one per player, not one per
+action, and not a `task.wait` loop per record.
+
+`architecture.md` asks for `Heartbeat` to be justified, so: a pool that drains
+over time has to be integrated over time, and there is no event that fires when
+"a second of sprinting has happened". Frames are accumulated until they are
+worth a tick (`Config.StaminaTickIntervalSeconds`, 0.1) and the pool is then
+stepped by the *real* elapsed time, so retuning the interval changes how often
+the number moves and never how fast it drains. A server with nobody on it
+iterates an empty table.
+
+Drains do not stack. A player holding Shift and Q pays the parry rate and not
+both, because `SprintState.walkSpeed` already says parry outranks sprint — they
+are walking at 8, so billing them for a sprint would be charging twice for one
+state. The precedence is written once in each place it applies and the two
+agree.
+
+### The replication threshold
+
+`StaminaChanged` fires when the pool has moved by
+`Config.StaminaReplicationStepFraction` of its maximum (2%), or has landed
+exactly on empty or full, and never otherwise. At the shipped drain rates that
+is about five messages a second while sprinting and **zero** for a player
+standing at full or pinned at zero — against sixty a second for the naive
+version.
+
+Both ends are always sent exactly, whatever the threshold is set to. The
+zero-stamina rules and the bar's hide-at-full behaviour are exact tests, and a
+client approximating those between two threshold updates would show a bar that
+never quite disappears, or would refuse a parry the server would have allowed.
+
+Smoothness is the client's job, not the wire's. `StaminaBarController` eases the
+fill towards the last value it was sent, on a `Heartbeat` connection it holds
+only while the bar is actually behind and disconnects the moment it arrives. The
+alternative — sending the *rate* and having the client extrapolate — was
+considered and rejected as more machinery than a five-a-second update needs.
+
+### Why a remote rather than an attribute on the Player
+
+`player:SetAttribute("Stamina", n)` would have replicated for free, the way
+`Humanoid.Health` does for the health bar, and it was the tempting option.
+
+It replicates to *every* client, though, not just to the player it belongs to.
+Health is already public — it is drawn over everyone's head — but a stamina pool
+is exactly the sort of thing an opponent would like to read to time an attack,
+and nothing in the game has needed a "public" state channel yet. Declaring the
+remote also keeps the whole client/server surface visible in `Remotes.luau`,
+which is the property `Net` exists to preserve.
+
+## Zero stamina refuses a guard, and that is the one dropped transition
+
+`ParryService.onParryStateRequest` drops a `"begin"` that arrives on an empty
+pool. That is a direct exception to **"never drop a valid transition"** in the
+parry section above, which is a rule written from a real bug, so it needs more
+than a shrug.
+
+The bug that rule came from was one-sided: the server dropped a transition for a
+reason the client could not predict (a rate limiter), so the two ended up in
+different states with the player slowed, unable to punch, watching a guard
+animation and taking full damage. Every part of that failure came from the
+client having no way to know it had been refused.
+
+The zero-stamina rule is not like that:
+
+- **It is deterministic and both sides can evaluate it.** `StaminaState.canBlock`
+  is one shared predicate. `ParryController` checks it against the pool the
+  server sent before it presses anything, so an honest client never sends a
+  `begin` that will be dropped — the same arrangement as `PunchRules.canPunch`,
+  which the client reuses to avoid firing a punch the server would reject.
+- **The disagreement window is bounded and self-correcting.** If a `begin` and a
+  stamina update cross, the client's guard is ended by its own zero-stamina
+  handler as soon as that update lands — one trip, the same bound as the two
+  parry races the section above already accepts and does not compensate.
+
+The alternative was to allow the `begin` and end the guard on the next tick.
+That leaves up to `StaminaTickIntervalSeconds` of genuine protection available
+to a client sending `begin` and `hold` back to back on an empty pool, which is
+the exact thing the rule is supposed to forbid.
+
+Running dry mid-guard is handled the other way round, and does not drop
+anything: `StaminaService` raises `onDepleted` on the transition to zero,
+`ParryService` applies its own ordinary `"end"`, and the client drops its guard
+when the same zero arrives over `StaminaChanged`. There is no "your guard was
+cancelled" remote, so there is nothing extra for a modified client to ignore —
+it can decline to lower its own arms, but the server has already stopped
+protecting them.
+
+### What this does and does not close
+
+It closes the free guard. Before this, `decisions.md` recorded that a modified
+client could hold a permanent front-facing guard for the life of its character,
+and that what would fix it was making the slowdown real. Stamina is a second
+answer to the same question and a more direct one: the guard now costs a
+resource the server owns outright, and no amount of never sending `end` makes
+that resource last longer. A permanent guard is no longer available to anybody,
+modified client or not.
+
+It does not close the movement gap. A modified client still guards at full speed
+— `WalkSpeed` is still the client's — it just cannot do it indefinitely.
+
+## A punch is judged by the stamina it was thrown with
+
+`CombatService` reads `punchDamageMultiplier` **before** it spends
+`Config.PunchStaminaCost`, so the swing that empties the pool still lands in
+full and the next one is the weak one.
+
+Read afterwards, a punch thrown while the bar was visibly full would deal 30% of
+its damage because the cost happened to cross zero on that swing. Players read
+that as a hit that failed, not as a cost they paid — the bar they were watching
+said they could afford it. This ordering means the reduced punch only ever
+happens on a bar that was already empty when the player clicked.
+
+Both the cost and the multiplier are applied at the line that records the
+cooldown, which is where `CombatService` already decides a swing happened. A
+punch that misses, or that is parried, costs stamina for the same reason it
+costs a cooldown: it was still a swing. The reduced damage is computed as
+`Config.PunchDamage * multiplier` at the single existing damage site, so 7.5 is
+never written down and retuning the punch retunes the exhausted one with it.
+
+## An empty pool takes the sprint away, with two thresholds and one latch
+
+Stamina originally charged for sprinting without ever stopping it. Running the
+pool to zero drained nothing further and changed nothing else: the player kept
+running at `Config.SprintWalkSpeed` on an empty bar. That was the shipped
+behaviour, not an accident — the manual sprint steps in `docs/testing.md` said
+so — and it is what this change closes.
+
+The rule is `StaminaState.sprintLocked`, beside `canBlock` and shared for the
+same reason: one definition, evaluated on both sides of the wire against the
+same number.
+
+### Why it is a latch rather than a predicate
+
+`canBlock` can be `not isEmpty` because a guard needs a fresh key press. A
+sprint does not — the key is already held — so the same rule applied to a sprint
+would release on the first tick of regeneration. At the shipped rates that is
+`+1` stamina followed immediately by `-1.2`, ten times a second, and the player
+would judder between 16 and 24 for as long as they held Shift.
+
+So the lockout engages at zero and releases at
+`Config.SprintRecoveryStaminaFraction` (0.25). The two thresholds are what makes
+exhaustion a state you recover from rather than a boundary you oscillate on. It
+is deliberately *not* a general "you cannot sprint below 25%" rule: a player who
+has never been exhausted may sprint on their last point of stamina. The fraction
+gates recovery from empty, nothing else — which is why the previous answer is an
+argument, exactly as `shouldReplicate` takes `lastSent`.
+
+The key is not an input to it. Releasing Shift and pressing it again at zero
+does not clear the lockout, and holding Shift through the whole exhaustion is
+enough to resume the moment it releases.
+
+### Where it is applied, and why that is not the client deciding
+
+The lockout lives in `SprintState` next to the sprint and parry intents, for the
+reason that state exists at all: everything that changes `WalkSpeed` has to be
+recomputed from one place, or the inputs strand each other. `RunningController`
+evaluates the shared rule against the pool `StaminaController` received and
+hands the answer in.
+
+That is a client applying a server-owned number through a shared predicate, not
+a client deciding when a player is exhausted — the same arrangement as
+`ParryController` checking `canBlock` before it presses anything. The reason it
+is not additionally snapped back by the server is the one the sprinting section
+above has been giving since before stamina existed: `WalkSpeed` is client-owned
+here, and making it server-authoritative is a movement change that deserves its
+own branch with nothing else in the diff.
+
+What the server does enforce is the half that decides recovery, and it needs no
+new code to do it: `StaminaService` regenerates a player it cannot see
+sprinting, and charges one it can. A client that keeps sprinting at zero keeps
+paying a drain against an empty pool and never refills. **Ignoring the lockout
+therefore buys a modified client nothing it did not already have, and costs it
+the recovery.**
+
+### The one thing that had to change on the wire
+
+`SprintStateRequest` now carries whether the player *is* sprinting rather than
+whether Shift is down. It is still one boolean, still sent only on change, and
+still carries no stamina value.
+
+The distinction is load-bearing rather than cosmetic. `StaminaService` charges
+the drain when the client declares the intent **or** the server can see a
+sprinting `WalkSpeed`, so an exhausted player who kept reporting a held key
+would be billed for a sprint they are not doing, would sit pinned at zero, and
+would never recover — the lockout would be permanent for exactly as long as the
+player held the key. Reporting the effective state is what lets the regeneration
+branch be reached under a held key, and it costs the same two messages per
+state change that a held key already cost.
+
+Parry is deliberately not folded into that boolean. A guarding player is still
+asking to sprint, and the server bills a guard from its own parry phase, so
+including it would send a pair of messages per guard to change a drain nothing
+reads.
 
 ## Screen effects read the Humanoid, and add no remote
 

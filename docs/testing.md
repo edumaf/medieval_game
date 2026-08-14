@@ -29,6 +29,8 @@ tests/
     Combat/
       ParryState.spec.luau
       PunchRules.spec.luau
+    Stamina/
+      StaminaState.spec.luau
   server/
     DeveloperAccess.spec.luau
     HealthService/
@@ -556,6 +558,122 @@ timeout being reintroduced by accident.
 
 42. Check Output for errors or warnings throughout. Malformed parry payloads are
     dropped silently by design, so nothing should appear there during honest
+    play at all.
+
+## Manual verification: Stamina
+
+`StaminaState` covers the pool arithmetic — clamping at both ends, the empty and
+full tests, the punch multiplier and the replication threshold — in
+`tests/shared/Stamina/StaminaState.spec.luau`. What no unit test can cover is a
+real character actually running, a guard actually ending when the pool runs out,
+and the bar on screen. Most of the interesting steps need two players.
+
+Use **Test → Clients and Servers** with 2 players, or Team Test if you are on
+separate machines.
+
+Before you start: the stamina bar is a Studio-authored screen. If
+`StarterGui.StaminaBar` does not exist yet, Output carries one warning naming
+the missing instance and the rest of the system still works — verify the
+gameplay steps first and come back to the UI ones.
+
+**Sprint**
+
+1. Hold Shift and run. Confirm the bar appears and drains steadily.
+2. Release Shift while still running. Confirm the drain stops and the bar starts
+   refilling within a fraction of a second.
+3. Let it refill completely. Confirm the bar disappears at exactly full and does
+   not linger part-filled.
+4. Hold Shift **standing still**. Confirm nothing drains — an idle player
+   holding the key is not sprinting.
+5. Hold Shift while walking face-first into a wall. Confirm nothing drains, for
+   the same reason.
+6. Sprint until the pool is empty, and keep holding Shift. Confirm you **drop to
+   the walking speed** at the moment the bar reaches zero, and stay there.
+7. Keep holding Shift and watch the bar refill. Confirm it refills steadily
+   while you walk — the pool must recover under a held key, not stall at zero —
+   and that you do **not** flicker between 16 and 24 as it climbs.
+8. Still holding Shift, confirm you start sprinting again on your own at about a
+   quarter of the bar (`Config.SprintRecoveryStaminaFraction`), without touching
+   the key.
+9. Sprint to empty again, then release Shift and immediately press it again,
+   repeatedly. Confirm this does **not** get you sprinting — the lockout is
+   released by the pool, never by the key.
+10. Empty the pool by punching rather than sprinting (see the Punch steps), then
+    hold Shift. Confirm you cannot sprint until the bar has recovered to the
+    same quarter — exhaustion is exhaustion, whatever spent it.
+11. Confirm sprinting itself is unchanged otherwise: 24 while held with stamina,
+    16 on release, 8 while parrying, and normal walking never affected by any of
+    this.
+12. Sprint, die mid-sprint (Esc → Reset Character), and respawn. Confirm the new
+    character starts on a full bar (so, a hidden one), that continuing to hold
+    Shift drains it again, and that a death *while exhausted* leaves the new
+    character able to sprint immediately.
+
+**Punch**
+
+13. Punch once from full. Confirm the bar appears and drops by one punch's worth,
+   then refills.
+14. Punch a target from full stamina. Confirm they lose exactly 25 and Output
+    logs `A punched B for 25 -> 75`.
+15. Punch at nothing, and punch someone who is guarding. Confirm stamina is
+    spent both times — a swing costs whether or not it lands.
+16. Drain the pool to zero with sprinting, then punch. Confirm the target loses
+    exactly **7.5** and Output logs `for 7.5`. If you have retuned
+    `PunchDamage` or `ZeroStaminaPunchDamageMultiplier`, confirm the logged
+    number is the product of the two.
+17. Punch repeatedly from full without sprinting until the pool empties.
+    Confirm the punch that *empties* the bar still deals 25, and the next one
+    deals 7.5. That ordering is deliberate — see `docs/decisions.md`.
+18. Confirm the punch is otherwise unchanged at zero stamina: same cooldown,
+    same swing animation, same reach, and still stopped completely by a guard.
+19. Watch the Network graph (F9 → Network, or the Studio microprofiler) while
+    holding Shift for ten seconds. Confirm stamina traffic is a handful of
+    messages a second, not one per frame.
+
+**Parry / block**
+
+20. Hold Q from full. Confirm the bar appears and drains, more slowly than
+    sprinting does.
+21. Release Q. Confirm the drain stops and the pool refills.
+22. Hold Q and Shift together. Confirm only **one** drain is charged, at the
+    parry rate, matching the fact that you are walking at 8.
+23. Hold Q until the pool empties. Confirm the guard **ends by itself**: the
+    pose drops, and a punch from the front now lands for full damage.
+24. Still at zero, press Q again. Confirm no guard starts — no animation, no
+    slowdown, and a punch from the front still lands.
+25. Let stamina regenerate a little, then press Q. Confirm a normal guard starts
+    again, with its usual wind-up.
+26. Have the other player punch you during step 23, in the moment the pool runs
+    out. Confirm you take the damage — the guard genuinely ended and did not
+    keep protecting you invisibly.
+
+**UI**
+
+27. Confirm the bar is hidden on join, before anything has been spent.
+28. Confirm it appears the moment stamina drops below full and stays visible for
+    the whole regeneration, not just while the key is held.
+29. Confirm it disappears again once the pool is full.
+30. Drain, die, and respawn. Confirm the bar is present, hidden and working for
+    the new character — a bar that stops updating after a death means the
+    ScreenGui has `ResetOnSpawn` on, or the controller lost its references.
+31. Confirm the fill moves smoothly rather than in visible steps, and that it
+    keeps up with a punch landing.
+
+**Multiplayer and authority**
+
+32. With both players sprinting, confirm each bar drains independently and
+    neither moves when the other player acts.
+33. Have one player empty their pool. Confirm the other player's punches still
+    deal 25, their guard still works, and — with both holding Shift — that only
+    the exhausted one drops to walking pace while the other keeps sprinting.
+34. Have one player leave and rejoin. Confirm they come back on a full pool and
+    that Output shows no errors about a missing record.
+35. In the client console, set any local stamina value you can find and confirm
+    it changes nothing that matters: punches keep dealing what the server says,
+    and a guard started on a locally-faked pool is refused by the server.
+
+36. Check Output for errors or warnings throughout. Malformed sprint payloads
+    are dropped silently by design, so nothing should appear there during honest
     play at all.
 
 ## Manual verification: Screen effects

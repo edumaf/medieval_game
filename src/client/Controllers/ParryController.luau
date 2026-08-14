@@ -19,10 +19,16 @@
 	rather than by looping it or re-playing it, so the animation is started
 	exactly once per parry and the marker fires exactly once.
 
-	A guard lasts as long as the key is held. There is no maximum duration on
-	either side, so the pose the player sees and the protection the server
-	grants begin and end together — the only things that finish a parry are
-	releasing Q, death, and a character being replaced.
+	A guard lasts as long as the key is held and the player can pay for it. There
+	is no maximum duration on either side, so the pose the player sees and the
+	protection the server grants begin and end together — the things that finish
+	a parry are releasing Q, running out of stamina, death, and a character being
+	replaced.
+
+	Stamina is the one of those four this controller does not observe directly.
+	The pool is the server's, and it arrives here through StaminaController, so
+	both the refusal to start a guard and the end of one that has run dry are
+	this controller following a number it was given rather than one it kept.
 
 	The animation is played on the local character's own Animator. A player's
 	character is client-network-owned, so that play call replicates to the
@@ -41,6 +47,7 @@ local Net = require(Shared.Net)
 local ParryState = require(Shared.Combat.ParryState)
 
 local RunningController = require(script.Parent.RunningController)
+local StaminaController = require(script.Parent.StaminaController)
 
 local log = Logger.forScope("ParryController")
 
@@ -224,6 +231,15 @@ local function onInputBegan(input: InputObject, gameProcessedEvent: boolean)
 		return
 	end
 
+	-- No guard on an empty pool. ParryService refuses the "begin" too, and that
+	-- is the check that decides; this one exists so an honest client never sends
+	-- one to be refused -- a wind-up that plays, slows the player and then turns
+	-- out never to have been a guard is exactly the desync the server-side rule
+	-- has to avoid. Same job as PunchController's local cooldown check.
+	if not StaminaController.canBlock() then
+		return
+	end
+
 	local track = parryTrack
 
 	-- A missing track means one of two completely different things, and they
@@ -306,6 +322,17 @@ function ParryController.Start()
 	if player.Character then
 		bindCharacter(player.Character)
 	end
+
+	-- A guard that runs the player out of stamina ends. ParryService has already
+	-- ended its own copy by the time this arrives -- it decided from the same
+	-- number -- so this is the client catching up with a guard it no longer has,
+	-- not the client deciding anything. endParry sends "end", which the server's
+	-- idle state ignores.
+	StaminaController.onChanged(function()
+		if StaminaController.isEmpty() then
+			endParry()
+		end
+	end)
 
 	UserInputService.InputBegan:Connect(onInputBegan)
 	UserInputService.InputEnded:Connect(onInputEnded)
