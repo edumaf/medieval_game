@@ -104,5 +104,4 @@ describe("Shared.Config", function()
 		expect(Config.ParryWalkSpeed < Config.NormalWalkSpeed).toBe(true)
 		expect(Config.NormalWalkSpeed < Config.SprintWalkSpeed).toBe(true)
 	end)
-
 end)
