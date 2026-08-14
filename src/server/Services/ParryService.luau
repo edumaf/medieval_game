@@ -70,7 +70,12 @@ local function onParryStateRequest(player: Player, transition: any)
 	-- Illegal orderings are no-ops inside the state machine rather than special
 	-- cases here, so this handler never has to reason about what came before —
 	-- and every legal transition is applied, always.
-	local requested = transition :: ParryState.Transition
+	--
+	-- Annotated rather than cast with `::`. Narrowing an `any` through an
+	-- assertion widens the singletons back to plain `string`, which then does
+	-- not satisfy Transition; an annotated local takes the `any` directly,
+	-- which is what isTransition above has already vouched for.
+	local requested: ParryState.Transition = transition
 	states[player] = ParryState.apply(stateOf(player), requested)
 end
 
