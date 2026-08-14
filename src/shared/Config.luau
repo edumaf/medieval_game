@@ -133,6 +133,82 @@ local Config = {
 	PunchHitMarkerName = "Hit",
 
 	--[[
+		Stamina. Authority lives in src/server/Services/StaminaService, which
+		owns the pool, runs the one update loop and replicates the value; the
+		pure arithmetic is in src/shared/Stamina/StaminaState; the bar is drawn
+		by src/client/Controllers/StaminaBarController.
+
+		Shared for the same reason the punch and parry numbers are: a player can
+		measure every one of these by playing for a minute, and knowing them does
+		not let a modified client drain more slowly. The server integrates the
+		pool from its own clock and never accepts a stamina value from anyone.
+
+		The values below are a first pass, tuned on paper rather than in Team
+		Test — retune them together once the bar has actually been played with.
+	]]
+
+	-- Size of a full stamina pool. Every character spawns with this much.
+	MaxStamina = 100,
+
+	-- Stamina spent per second of sprinting, so roughly eight seconds of
+	-- continuous sprint from full.
+	--
+	-- Only ever charged while the server can see the character actually moving:
+	-- holding Left Shift standing still is not sprinting, and a player who holds
+	-- it out of habit should not be paying for it.
+	SprintStaminaDrainPerSecond = 12,
+
+	-- Stamina spent per second of holding a guard, so roughly twelve seconds of
+	-- continuous parry from full.
+	--
+	-- Charged for the whole engaged phase, wind-up included, matching the
+	-- slowdown and the punch lockout — see ParryState.isEngaged for why those
+	-- start at the key press rather than at the Hold marker.
+	--
+	-- This outranks the sprint drain rather than stacking with it, exactly as
+	-- ParryWalkSpeed outranks SprintWalkSpeed: a player holding both keys is
+	-- walking at 8, so charging them for a sprint they are not doing would be
+	-- paying twice for one state.
+	ParryStaminaDrainPerSecond = 8,
+
+	-- Stamina spent by one valid swing, so ten punches from a full pool.
+	--
+	-- Charged once per swing the server accepts, at the same point the swing
+	-- costs the attacker their cooldown — a punch that misses, or that is
+	-- parried, still cost the effort of throwing it.
+	PunchStaminaCost = 10,
+
+	-- Stamina restored per second while sprinting, punching and parrying are all
+	-- idle, so ten seconds from empty back to full.
+	--
+	-- There is deliberately no delay before this starts: the pool begins
+	-- refilling on the tick after the last stamina-consuming action stops.
+	StaminaRegenPerSecond = 10,
+
+	-- What a punch thrown on an empty pool is worth, as a multiplier on
+	-- PunchDamage. CombatService multiplies the two, so the reduced damage is
+	-- always derived and the number 7.5 appears nowhere.
+	ZeroStaminaPunchDamageMultiplier = 0.3,
+
+	-- How often StaminaService's single Heartbeat loop actually steps every
+	-- player's pool. The step is integrated against real elapsed time, so this
+	-- changes how often the pool moves, never how fast it drains.
+	StaminaTickIntervalSeconds = 0.1,
+
+	-- How far the pool must move, as a fraction of MaxStamina, before the server
+	-- sends the owning client another StaminaChanged. At 0.02 a full-speed drain
+	-- costs about five messages a second instead of one per frame; the client
+	-- smooths between them. Both ends of the pool are always sent exactly,
+	-- whatever this is set to — see StaminaState.shouldReplicate.
+	StaminaReplicationStepFraction = 0.02,
+
+	-- How fast a character has to actually be travelling, in studs per second
+	-- along the ground, before the server counts them as sprinting. A guard
+	-- against paying for a sprint that is not happening (standing still, or
+	-- running into a wall), not a gameplay dial.
+	StaminaSprintMinMoveSpeed = 1,
+
+	--[[
 		Parrying. Authority lives in src/server/Services/ParryService, which
 		CombatService consults before it deals damage; input and animation in
 		src/client/Controllers/ParryController; the shared phases and the

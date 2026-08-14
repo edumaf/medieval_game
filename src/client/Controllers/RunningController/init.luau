@@ -7,16 +7,22 @@
 	setting WalkSpeed itself, so the two systems cannot fight over the property.
 	See SprintState for why both intents live in one state.
 
-	Client-only, no remote involved: Humanoid.WalkSpeed is a replicated
-	property and a player's own character is client-network-owned by default,
-	so setting it locally already reaches the server and other clients. There
-	is currently nothing (stamina, combat, speed-gated rewards) a modified
-	client could gain by lying about its speed -- see docs/decisions.md for
-	when that stops being true and this needs server validation.
+	The speed itself is still applied locally: Humanoid.WalkSpeed is a replicated
+	property and a player's own character is client-network-owned by default, so
+	setting it here already reaches the server and other clients.
+
+	What has changed is that something now cares. Stamina is charged for
+	sprinting, and it is charged on the server, so this controller reports its
+	sprint intent over SprintStateRequest -- one boolean, on the frame it
+	changes, never on a schedule and never per frame. It reports; it does not
+	decide. Nothing is sent about how much stamina to spend, because the server
+	drains the pool from its own clock and would ignore a number from here
+	anyway. See docs/decisions.md for what this does and does not close.
 
 	Input connections and the CharacterAdded connection are made once, in
-	Start(). Respawning only swaps the Humanoid reference; it never
-	reconnects anything, so there is nothing to leak or duplicate.
+	Start(). Respawning only swaps the Humanoid reference and re-states the
+	intent; it never reconnects anything, so there is nothing to leak or
+	duplicate.
 ]]
 
 local Players = game:GetService("Players")
@@ -26,6 +32,7 @@ local UserInputService = game:GetService("UserInputService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
 local Logger = require(Shared.Util.Logger)
+local Net = require(Shared.Net)
 
 local SprintState = require(script.SprintState)
 
@@ -36,6 +43,37 @@ local RunningController = {}
 local player = Players.LocalPlayer
 local humanoid: Humanoid? = nil
 local state = SprintState.initial()
+
+local sprintRequest: RemoteEvent? = nil
+
+-- What the server was last told. Sending only on a change is what keeps a held
+-- key down to two messages -- one on press, one on release -- rather than a
+-- stream of them for as long as the player is running.
+local lastSentSprinting: boolean? = nil
+
+--[[
+	Tells the server whether the player is asking to sprint, if that has changed
+	since the last time it was told.
+
+	`force` re-states it regardless, which a respawn does: the intent survives a
+	death here (holding Shift through one keeps sprinting), so the new character
+	starts draining stamina for a key that was pressed before it existed, and a
+	single message on spawn is cheaper than the two realms quietly disagreeing
+	about it.
+]]
+local function sendSprintIntent(force: boolean)
+	local remote = sprintRequest
+	if remote == nil then
+		return
+	end
+
+	if not force and lastSentSprinting == state.sprintRequested then
+		return
+	end
+
+	lastSentSprinting = state.sprintRequested
+	remote:FireServer(state.sprintRequested)
+end
 
 --[[
 	Applies the current sprint-intent state to whichever Humanoid is active
@@ -80,6 +118,7 @@ end
 local function onCharacterAdded(character: Model)
 	humanoid = character:WaitForChild("Humanoid") :: Humanoid
 	applyWalkSpeed()
+	sendSprintIntent(true)
 end
 
 local function onInputBegan(input: InputObject, gameProcessedEvent: boolean)
@@ -88,6 +127,7 @@ local function onInputBegan(input: InputObject, gameProcessedEvent: boolean)
 	end
 	state = SprintState.withInputBegan(state)
 	applyWalkSpeed()
+	sendSprintIntent(false)
 end
 
 -- Deliberately does not check gameProcessedEvent: if it did, releasing Shift
@@ -99,9 +139,16 @@ local function onInputEnded(input: InputObject, _gameProcessedEvent: boolean)
 	end
 	state = SprintState.withInputEnded(state)
 	applyWalkSpeed()
+	sendSprintIntent(false)
 end
 
 function RunningController.Start()
+	-- Yields until the remote replicates, which is why this is Start and not
+	-- Init. Until it returns, sendSprintIntent is a no-op and the speed still
+	-- applies locally -- the player sprints, and the server starts charging for
+	-- it a moment later.
+	sprintRequest = Net.getEvent("SprintStateRequest")
+
 	player.CharacterAdded:Connect(onCharacterAdded)
 	if player.Character then
 		onCharacterAdded(player.Character)

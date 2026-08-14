@@ -18,6 +18,13 @@
 	Damage goes through HealthService rather than touching Humanoid.Health, so
 	the existing clamping, death and respawn rules apply unchanged.
 
+	Stamina changes what a swing costs and what it is worth, not how it is
+	resolved: every accepted swing spends Config.PunchStaminaCost, and one thrown
+	on an empty pool deals Config.ZeroStaminaPunchDamageMultiplier of the normal
+	damage. Both come from StaminaService, which owns the number; nothing about
+	target selection, reach or the parry gates below changed, and a punch on an
+	empty pool still lands, still hurts, and is still stopped by a guard.
+
 	Parrying adds two gates and changes nothing else: an attacker who is in a
 	parry cannot swing, and a selected target holding a guard that covers the
 	direction the punch came from takes no damage. Both answers come from
@@ -40,6 +47,7 @@ local PunchRules = require(Shared.Combat.PunchRules)
 
 local HealthService = require(script.Parent.HealthService)
 local ParryService = require(script.Parent.ParryService)
+local StaminaService = require(script.Parent.StaminaService)
 
 local log = Logger.forScope("CombatService")
 
@@ -102,6 +110,20 @@ local function onPunchRequest(attacker: Player)
 	if attackerRoot == nil or not isAlive(attacker) then
 		return
 	end
+
+	-- Stamina is charged here: late enough that a dead player is not billed for
+	-- a swing they could not have thrown -- PunchController still fires the
+	-- request on a click made with no character, since it has no animation left
+	-- to gate on -- and early enough that a swing which finds nobody still
+	-- costs, exactly as it costs the cooldown recorded above.
+	--
+	-- The multiplier is read BEFORE the cost is taken, so the swing is judged by
+	-- the stamina the attacker had when they threw it. Reading it afterwards
+	-- would make the punch that empties the pool land at reduced damage on a bar
+	-- the player watched as full, which reads as a bug rather than as a cost;
+	-- this way that punch lands in full and the next one is the weak one.
+	local damageMultiplier = StaminaService.punchDamageMultiplier(attacker)
+	StaminaService.consume(attacker, Config.PunchStaminaCost)
 
 	local origin = attackerRoot.Position
 	local lookVector = attackerRoot.CFrame.LookVector
@@ -166,8 +188,11 @@ local function onPunchRequest(attacker: Player)
 		return
 	end
 
-	local remaining = HealthService.takeDamage(target, Config.PunchDamage)
-	log.info(`{attacker.Name} punched {target.Name} for {Config.PunchDamage} -> {remaining}`)
+	-- Derived from PunchDamage rather than written down, so the reduced hit is
+	-- always a fraction of the real one and retuning the punch retunes both.
+	local damage = Config.PunchDamage * damageMultiplier
+	local remaining = HealthService.takeDamage(target, damage)
+	log.info(`{attacker.Name} punched {target.Name} for {damage} -> {remaining}`)
 end
 
 function CombatService.Init()
