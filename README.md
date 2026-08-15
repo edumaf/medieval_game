@@ -117,9 +117,12 @@ of where everyone is standing.
   hit from behind while guarding is working as intended.
 - **Stamina is the server's, and it is spent by all three.** Sprinting and
   guarding drain it continuously, every swing costs a fixed amount, and it
-  refills when you are doing none of them. On an empty pool you cannot guard at
-  all, and your punches deal 30% of their damage — they still land, they just
-  stop hurting.
+  refills when you are doing none of them.
+- **Running it to zero makes you EXHAUSTED, and that is one state.** No sprint,
+  no guard, and punches that still swing and still connect but deal **zero**
+  damage. All three come back together — and the dark vignette clears — only
+  once the pool reaches `StaminaRecoveryFraction` (25%). Being merely low costs
+  you nothing: the threshold gates the way out of exhaustion, never the way in.
 - **All the numbers are in `src/shared/Config.luau`** — damage, reach, cooldown,
   cone angle, sprint speed, parry speed, parry arc, lag allowance, and every
   stamina rate and cost. Tune there, not in Studio.

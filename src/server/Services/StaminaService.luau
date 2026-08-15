@@ -24,20 +24,33 @@
 	design: exactly one Heartbeat connection for the entire server, exactly one
 	place per player where the number moves, and no second timer anywhere.
 
-	Reaching zero has three consequences. Two are enforced entirely here: punches
-	drop to Config.ZeroStaminaPunchDamageMultiplier of their damage (applied by
-	CombatService, which reads punchDamageMultiplier below), and a guard can
-	neither be started nor held (enforced by ParryService, which reads canBlock
-	and subscribes to onDepleted). A modified client cannot avoid either, because
-	neither asks the client anything.
+	Reaching zero makes the player EXHAUSTED, and that is one latched state
+	rather than three separate rules. `record.exhausted` is computed by
+	StaminaState.isExhausted, engages the moment the pool empties whatever
+	emptied it, and releases only once the pool is back to
+	Config.StaminaRecoveryFraction. Everything an empty pool takes away reads
+	that single boolean, so all of it goes away together and all of it comes
+	back together:
 
-	The third is the sprint, and it is the one this service does not apply
-	itself: sprinting is a WalkSpeed, RunningController is the only writer of
-	that property, and making it server-authoritative is a movement change this
-	feature deliberately does not make (docs/decisions.md). What is enforced here
-	is the pool, which is the half that matters for recovery — a player the
-	server can still see sprinting is charged rather than regenerated, so no
-	client can refill while it keeps running.
+	  * Guarding    — refused and ended (ParryService reads canBlock and
+	                  subscribes to onDepleted).
+	  * Punch damage — multiplied by zero (CombatService reads
+	                  punchDamageMultiplier). The swing itself is never refused;
+	                  it lands, it is heard, and it does nothing.
+	  * Sprinting   — see below.
+	  * The vignette — the client draws it from the replicated flag.
+
+	A modified client cannot avoid the first two, because neither asks the client
+	anything. The latch itself is replicated rather than recomputed client-side,
+	so there is nothing for one to disagree with either.
+
+	The sprint is the one this service does not apply itself: sprinting is a
+	WalkSpeed, RunningController is the only writer of that property, and making
+	it server-authoritative is a movement change this feature deliberately does
+	not make (docs/decisions.md). What is enforced here is the pool, which is the
+	half that matters for recovery — a player the server can still see sprinting
+	is charged rather than regenerated, so no client can refill while it keeps
+	running.
 
 	Follows the HealthService pattern: state in a module-local table keyed by
 	Player, Init() registers the remote handler before any client can reach it,
@@ -83,6 +96,15 @@ type Record = {
 	humanoid: Humanoid?,
 	rootPart: BasePart?,
 
+	-- Whether this player is exhausted, as StaminaState.isExhausted last
+	-- answered it. The authoritative copy of the single exhaustion latch: the
+	-- sprint lockout, the guard refusal, the zero-damage punch and the client's
+	-- vignette are all this one boolean, replicated rather than re-derived.
+	--
+	-- It is the memory the pure predicate needs kept for it, held here because
+	-- this is the only place the pool itself is written.
+	exhausted: boolean,
+
 	-- Last value sent to this player, or nil if they have never been sent one.
 	-- The whole replication policy is StaminaState.shouldReplicate reading this.
 	lastSent: number?,
@@ -127,7 +149,28 @@ local function replicate(player: Player, record: Record, force: boolean)
 	end
 
 	record.lastSent = current
-	remote:FireClient(player, current, record.state.max)
+	-- The exhaustion latch rides the message the pool was already sending
+	-- rather than getting a remote of its own. The client never recomputes it:
+	-- the server decides it, so a modified client cannot talk itself out of
+	-- being exhausted, and the bar, the sprint, the guard and the vignette all
+	-- read the same answer this service reached.
+	remote:FireClient(player, current, record.state.max, record.exhausted)
+end
+
+--[[
+	Recomputes the exhaustion latch after the pool has moved, and returns whether
+	it changed.
+
+	The only place `record.exhausted` is ever written. Every path that touches
+	the pool calls this immediately afterwards, so there is exactly one rule
+	(StaminaState.isExhausted) evaluated in exactly one place, whatever spent the
+	stamina.
+]]
+local function refreshExhaustion(record: Record): boolean
+	local wasExhausted = record.exhausted
+	record.exhausted =
+		StaminaState.isExhausted(record.state, wasExhausted, Config.StaminaRecoveryFraction)
+	return record.exhausted ~= wasExhausted
 end
 
 --[[
@@ -200,7 +243,7 @@ local function step(player: Player, record: Record, elapsed: number)
 		return
 	end
 
-	local wasEmpty = StaminaState.isEmpty(record.state)
+	local wasExhausted = record.exhausted
 
 	if record.blocking then
 		record.state =
@@ -212,13 +255,18 @@ local function step(player: Player, record: Record, elapsed: number)
 		record.state = StaminaState.regenerate(record.state, Config.StaminaRegenPerSecond * elapsed)
 	end
 
-	-- Fired once on the transition, never for every tick spent at zero, so a
-	-- listener that ends a guard cannot end it repeatedly.
-	if not wasEmpty and StaminaState.isEmpty(record.state) then
+	local changed = refreshExhaustion(record)
+
+	-- Fired once on the transition into exhaustion, never for every tick spent
+	-- there, so a listener that ends a guard cannot end it repeatedly.
+	if not wasExhausted and record.exhausted then
 		notifyDepleted(player)
 	end
 
-	replicate(player, record, false)
+	-- Forced when the latch moved. Recovery lands part way between two ordinary
+	-- replication steps, and a client that heard about it a tick late would
+	-- refuse a guard the server would have allowed.
+	replicate(player, record, changed)
 end
 
 --[[
@@ -274,18 +322,39 @@ end
 ]]
 function StaminaService.canBlock(player: Player): boolean
 	local record = records[player]
-	return if record then StaminaState.canBlock(record.state) else true
+	return if record then not record.exhausted else true
+end
+
+--[[
+	Whether this player is exhausted right now, or false if they have already
+	left. The single latch, read directly rather than recomputed.
+]]
+function StaminaService.isExhausted(player: Player): boolean
+	local record = records[player]
+	return if record then record.exhausted else false
 end
 
 --[[
 	What a punch thrown by this player right now is worth, as a multiplier on
 	Config.PunchDamage.
 
+	Zero while exhausted, one otherwise. The punch itself is never refused: the
+	swing plays, the impact is heard, and the target simply takes nothing. That
+	is deliberate — an attack that silently does not happen reads as a broken
+	game, whereas one that visibly connects for nothing reads as being too tired
+	to hurt anybody, which is what it is.
+
+	Exhaustion is the same latch the sprint and the guard read, so a punch is
+	worth nothing for exactly as long as those are unavailable, and all three
+	come back together at Config.StaminaRecoveryFraction. Being merely low on
+	stamina costs nothing: a player who has never hit zero punches at full
+	strength on their last point.
+
 	CombatService reads this *before* it charges the punch, so a swing is judged
 	by the stamina the attacker had when they threw it: the punch that empties
-	the pool still lands at full strength, and the next one is the weak one.
+	the pool still lands in full, and the next one is the one worth nothing.
 	Reading it afterwards would make a punch thrown on a full-looking bar deal
-	reduced damage, which reads as a bug rather than as a cost.
+	nothing, which reads as a bug rather than as a cost.
 
 	A player with no record punches at full strength, for the same reason
 	canBlock allows a missing record.
@@ -296,7 +365,7 @@ function StaminaService.punchDamageMultiplier(player: Player): number
 		return 1
 	end
 
-	return StaminaState.damageMultiplier(record.state, Config.ZeroStaminaPunchDamageMultiplier)
+	return if record.exhausted then 0 else 1
 end
 
 --[[
@@ -313,16 +382,18 @@ function StaminaService.consume(player: Player, amount: number): number?
 		return nil
 	end
 
-	local wasEmpty = StaminaState.isEmpty(record.state)
+	local wasExhausted = record.exhausted
 	record.state = StaminaState.consume(record.state, amount)
+	local changed = refreshExhaustion(record)
 
-	if not wasEmpty and StaminaState.isEmpty(record.state) then
+	if not wasExhausted and record.exhausted then
 		notifyDepleted(player)
 	end
 
 	-- Not deferred to the next tick: a punch is a step change rather than a
 	-- gradual one, and the bar should show it landing on the frame it happened.
-	replicate(player, record, false)
+	-- Forced when the latch moved, for the same reason step() forces it.
+	replicate(player, record, changed)
 	return record.state.current
 end
 
@@ -372,6 +443,10 @@ local function onCharacterAdded(player: Player, character: Model)
 	-- previous one died on.
 	record.state = StaminaState.new(Config.MaxStamina)
 	record.blocking = false
+	-- A respawn is a clean slate: a full pool cannot be exhausted, and clearing
+	-- the latch here is what makes exhaustion end with the character rather
+	-- than follow the player into the next one.
+	record.exhausted = false
 
 	-- Forced: a respawn is a jump rather than a drain, and the client has no
 	-- earlier value for this character to smooth away from.
@@ -441,6 +516,7 @@ local function attachPlayer(player: Player)
 		state = StaminaState.new(Config.MaxStamina),
 		sprinting = false,
 		blocking = false,
+		exhausted = false,
 		humanoid = nil,
 		rootPart = nil,
 		lastSent = nil,

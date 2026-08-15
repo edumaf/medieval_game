@@ -8,8 +8,9 @@
 	reads a clock or touches an Instance.
 
 	Shared rather than server-only, for the same reason PunchRules is shared: the
-	client reuses `canBlock` to avoid starting a parry the server is going to
-	refuse, and reuses `fillFraction` to draw the bar. Nothing here is secret —
+	client reuses the exhaustion answer to avoid starting a parry the server is
+	going to refuse, and reuses `fillFraction` to draw the bar. Nothing here is
+	secret —
 	every number it works with already lives in Config, and knowing the drain
 	rate does not let a modified client drain more slowly, because the server
 	recomputes the pool from its own clock and never accepts a stamina value from
@@ -90,66 +91,53 @@ function StaminaState.regenerate(state: StaminaState, amount: number): StaminaSt
 end
 
 --[[
-	Whether the player may be in a block/parry right now.
+	Whether the player is exhausted, given whether they already were.
 
-	Both halves of the zero-stamina blocking rule read this: ParryService refuses
-	to begin a guard when it is false, and StaminaService ends a guard that is
-	already up the moment it becomes false. One predicate, so "cannot start" and
-	"cannot continue" can never drift apart.
-]]
-function StaminaState.canBlock(state: StaminaState): boolean
-	return not StaminaState.isEmpty(state)
-end
+	**The** definition of exhaustion in this game. Everything that an empty pool
+	takes away reads this one answer and no other: sprinting (RunningController
+	applies it to WalkSpeed), guarding (ParryService refuses a begin and
+	StaminaService ends a live guard), punch damage (CombatService multiplies by
+	zero), and the exhaustion vignette. One rule, so "cannot start", "cannot
+	continue", "does no damage" and "is being told about it" can never drift
+	apart.
 
---[[
-	Whether sprinting is locked out, given whether it already was.
-
-	The one definition of the exhaustion rule, in the same place as canBlock and
-	for the same reason: RunningController applies it to the pool the server
-	sent, and it must not be able to drift from what the server charges for.
-
-	Unlike canBlock this is a latch rather than a plain predicate, because
-	"recovered enough" is not a property of the current value alone. Two
-	thresholds, and they are deliberately different:
+	A latch rather than a plain predicate, because "recovered enough" is not a
+	property of the current value alone. The two ends are deliberately different:
 
 	  * It engages on an empty pool, whatever emptied it -- sprinting, a guard,
-	    or a punch.
+	    or a punch. All three spend the same pool and all three reach zero the
+	    same way.
 	  * It releases only once the pool is back to `recoveryFraction` of its
-	    maximum, which is what stops the lockout flickering off after one tick of
-	    regeneration.
+	    maximum, which is what stops it flickering off after one tick of
+	    regeneration and what makes exhaustion a state the player has to climb
+	    out of rather than a threshold they hover on.
 
-	`wasLocked` is the caller's previous answer, exactly as shouldReplicate takes
-	`lastSent`. That is what keeps the memory in the caller and this function
-	pure. The key is not an input, so releasing and re-pressing Shift while
-	exhausted cannot clear it.
+	The asymmetry is the point, and it is also why a player who has never been
+	exhausted is unaffected: with `wasExhausted` false, anything above zero
+	answers false, so the last few points of a full pool spend exactly as
+	normally as the first few. The recovery fraction only ever gates the way
+	*out*.
+
+	`wasExhausted` is the caller's previous answer, exactly as shouldReplicate
+	takes `lastSent`. That is what keeps the memory in the caller and this
+	function pure. StaminaService is the caller that matters -- it holds the
+	authoritative latch and replicates the result -- so no client is deciding
+	this for itself.
 ]]
-function StaminaState.sprintLocked(
+function StaminaState.isExhausted(
 	state: StaminaState,
-	wasLocked: boolean,
+	wasExhausted: boolean,
 	recoveryFraction: number
 ): boolean
 	if StaminaState.isEmpty(state) then
 		return true
 	end
 
-	if wasLocked then
+	if wasExhausted then
 		return StaminaState.fillFraction(state) < recoveryFraction
 	end
 
 	return false
-end
-
---[[
-	What a punch thrown in this state is worth, as a multiplier on the normal
-	punch damage.
-
-	`zeroStaminaMultiplier` is passed in rather than read from Config so this
-	stays pure, the same way SprintState.walkSpeed takes its three speeds. The
-	caller multiplies Config.PunchDamage by the result, so the reduced damage is
-	always derived from the real damage and never written down twice.
-]]
-function StaminaState.damageMultiplier(state: StaminaState, zeroStaminaMultiplier: number): number
-	return if StaminaState.isEmpty(state) then zeroStaminaMultiplier else 1
 end
 
 --[[

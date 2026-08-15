@@ -20,10 +20,11 @@
 
 	Stamina changes what a swing costs and what it is worth, not how it is
 	resolved: every accepted swing spends Config.PunchStaminaCost, and one thrown
-	on an empty pool deals Config.ZeroStaminaPunchDamageMultiplier of the normal
-	damage. Both come from StaminaService, which owns the number; nothing about
-	target selection, reach or the parry gates below changed, and a punch on an
-	empty pool still lands, still hurts, and is still stopped by a guard.
+	while its thrower is exhausted deals no damage at all. Both come from
+	StaminaService, which owns the number and the exhaustion latch; nothing
+	about target selection, reach or the parry gates below changed, and an
+	exhausted punch still swings, still connects, still makes its noise, and is
+	still stopped by a guard — it simply takes nothing off the target.
 
 	Parrying adds two gates and changes nothing else: an attacker who is in a
 	parry cannot swing, and a selected target holding a guard that covers the
@@ -126,9 +127,9 @@ local function onPunchRequest(attacker: Player)
 	--
 	-- The multiplier is read BEFORE the cost is taken, so the swing is judged by
 	-- the stamina the attacker had when they threw it. Reading it afterwards
-	-- would make the punch that empties the pool land at reduced damage on a bar
-	-- the player watched as full, which reads as a bug rather than as a cost;
-	-- this way that punch lands in full and the next one is the weak one.
+	-- would make the punch that empties the pool land for nothing on a bar the
+	-- player watched as full, which reads as a bug rather than as a cost; this
+	-- way that punch lands in full and the next one is the harmless one.
 	local damageMultiplier = StaminaService.punchDamageMultiplier(attacker)
 	StaminaService.consume(attacker, Config.PunchStaminaCost)
 
@@ -195,8 +196,10 @@ local function onPunchRequest(attacker: Player)
 		return
 	end
 
-	-- Derived from PunchDamage rather than written down, so the reduced hit is
-	-- always a fraction of the real one and retuning the punch retunes both.
+	-- Derived from PunchDamage rather than written down. The multiplier is 1 or
+	-- 0: an exhausted swing reaches HealthService with nothing, and
+	-- HealthState.damage ignores a non-positive amount, so the target's health
+	-- is not touched and no death can be triggered by one.
 	local damage = Config.PunchDamage * damageMultiplier
 	local remaining = HealthService.takeDamage(target, damage)
 

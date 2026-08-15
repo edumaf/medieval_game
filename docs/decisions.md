@@ -854,10 +854,11 @@ client having no way to know it had been refused.
 
 The zero-stamina rule is not like that:
 
-- **It is deterministic and both sides can evaluate it.** `StaminaState.canBlock`
-  is one shared predicate. `ParryController` checks it against the pool the
-  server sent before it presses anything, so an honest client never sends a
-  `begin` that will be dropped — the same arrangement as `PunchRules.canPunch`,
+- **It is deterministic and both sides can evaluate it.** The exhaustion latch
+  is one shared answer, computed by the server and replicated.
+  `ParryController` checks it through `StaminaController.canBlock` before it
+  presses anything, so an honest client never sends a `begin` that will be
+  dropped — the same arrangement as `PunchRules.canPunch`,
   which the client reuses to avoid firing a punch the server would reject.
 - **The disagreement window is bounded and self-correcting.** If a `begin` and a
   stamina update cross, the client's guard is ended by its own zero-stamina
@@ -896,18 +897,11 @@ It does not close the movement gap. A modified client still guards at full speed
 `Config.PunchStaminaCost`, so the swing that empties the pool still lands in
 full and the next one is the weak one.
 
-Read afterwards, a punch thrown while the bar was visibly full would deal 30% of
-its damage because the cost happened to cross zero on that swing. Players read
-that as a hit that failed, not as a cost they paid — the bar they were watching
-said they could afford it. This ordering means the reduced punch only ever
-happens on a bar that was already empty when the player clicked.
-
-Both the cost and the multiplier are applied at the line that records the
-cooldown, which is where `CombatService` already decides a swing happened. A
-punch that misses, or that is parried, costs stamina for the same reason it
-costs a cooldown: it was still a swing. The reduced damage is computed as
-`Config.PunchDamage * multiplier` at the single existing damage site, so 7.5 is
-never written down and retuning the punch retunes the exhausted one with it.
+Read afterwards, a punch thrown while the bar was visibly full would deal nothing
+because the cost happened to cross zero on that swing. Players read that as a hit
+that failed, not as a cost they paid — the bar they were watching said they could
+afford it. This ordering means the harmless punch is always the one thrown *after*
+the bar ran out, which is legible.
 
 ## An empty pool takes the sprint away, with two thresholds and one latch
 
@@ -917,20 +911,19 @@ running at `Config.SprintWalkSpeed` on an empty bar. That was the shipped
 behaviour, not an accident — the manual sprint steps in `docs/testing.md` said
 so — and it is what this change closes.
 
-The rule is `StaminaState.sprintLocked`, beside `canBlock` and shared for the
-same reason: one definition, evaluated on both sides of the wire against the
-same number.
+The rule is `StaminaState.isExhausted`, and it is now the *only* exhaustion rule
+in the game — see "One exhaustion, four consequences" below.
 
 ### Why it is a latch rather than a predicate
 
-`canBlock` can be `not isEmpty` because a guard needs a fresh key press. A
-sprint does not — the key is already held — so the same rule applied to a sprint
-would release on the first tick of regeneration. At the shipped rates that is
+A plain `not isEmpty` would do for a guard, because a guard needs a fresh key
+press. A sprint does not — the key is already held — so the same rule applied to
+a sprint would release on the first tick of regeneration. At the shipped rates that is
 `+1` stamina followed immediately by `-1.2`, ten times a second, and the player
 would judder between 16 and 24 for as long as they held Shift.
 
 So the lockout engages at zero and releases at
-`Config.SprintRecoveryStaminaFraction` (0.25). The two thresholds are what makes
+`Config.StaminaRecoveryFraction` (0.25). The two thresholds are what makes
 exhaustion a state you recover from rather than a boundary you oscillate on. It
 is deliberately *not* a general "you cannot sprint below 25%" rule: a player who
 has never been exhausted may sprint on their last point of stamina. The fraction
@@ -1175,6 +1168,11 @@ would be fitted to the spread automatically.
 
 ## The exhaustion vignette reads the sprint lockout, not the pool
 
+> **Superseded** by "One exhaustion, four consequences" below. The vignette no
+> longer derives anything: it reads the server's single replicated exhaustion
+> latch, and `Config.ScreenEffectExhaustionRearmFraction` has been deleted. The
+> reasoning below is kept because it is why the shared latch exists.
+
 `ScreenEffectsController` draws a near-black vignette once, as the sprint
 lockout engages. It adds no stamina state, no second depletion check and no
 remote.
@@ -1184,7 +1182,7 @@ fires `StaminaChanged` on meaningful change; `StaminaController` holds the
 client's copy and hands it to whoever asks through `onChanged`. This controller
 subscribes exactly as `RunningController` does, applies the same shared
 `StaminaState.sprintLocked` predicate to the same server-owned number with the
-same `Config.SprintRecoveryStaminaFraction`, and draws when the answer goes
+same `Config.StaminaRecoveryFraction`, and draws when the answer goes
 true. The two consumers evaluate the same pure function against the same inputs
 in the same order, so they cannot disagree about when the player is exhausted —
 there is one definition of it in this game and neither of them owns it.
@@ -1219,7 +1217,7 @@ at is not, and conflating the two shipped a real defect.
 `StaminaState.sprintLocked` engages on an empty pool *whatever emptied it* —
 sprinting, a guard, or a punch — so the vignette was never actually tied to
 sprinting. What was tied to sprinting was the threshold it came back at. The
-first implementation passed `Config.SprintRecoveryStaminaFraction`, the gate
+first implementation passed `Config.StaminaRecoveryFraction`, the gate
 that decides when sprinting returns, and that gate stays engaged all the way up
 to a quarter of the pool. A player who ran the pool dry, recovered part way, and
 then emptied it again by guarding or punching produced no rising edge and no
@@ -1271,3 +1269,78 @@ sound will ride the same 0-to-1 envelope as its own vignette from the first
 time it plays, with no code to write. Borrowing the damage or heal sting
 instead would have been worse than silence, and inventing an asset id worse
 still.
+
+## One exhaustion, four consequences
+
+Running the stamina pool to zero makes a player EXHAUSTED. That is one latched
+state — `StaminaState.isExhausted`, held by `StaminaService` as
+`record.exhausted` — and everything an empty pool takes away reads it:
+
+| Consequence | Read by | Enforced |
+| --- | --- | --- |
+| No sprint | `RunningController` | client-applied, server-charged |
+| No guard | `ParryService.canBlock`, `onDepleted` | server |
+| Punch damage × 0 | `CombatService` | server |
+| Dark vignette | `ScreenEffectsController` | client, cosmetic |
+
+It engages the moment the pool empties, whatever emptied it, and releases only
+at `Config.StaminaRecoveryFraction`. All four therefore go away together and
+come back together, at the same instant, for every player.
+
+### Why they had drifted apart
+
+They started as three unrelated predicates written for three unrelated
+features, and each got the hysteresis its own feature happened to need:
+
+- **Sprint** used `sprintLocked`, a latch releasing at 25%, because a held key
+  would otherwise judder.
+- **Guard** used `canBlock`, plain `not isEmpty`, because a guard needs a fresh
+  key press and so cannot judder — it came back at one point of stamina.
+- **Punch** used `damageMultiplier`, also plain `not isEmpty`, and dealt 30%
+  damage rather than none — also back at one point of stamina.
+
+Each was defensible alone and the set was incoherent together: a player at 5%
+could not sprint, could guard, and punched at full strength. There was no such
+thing as "exhausted" to ask about, only three questions with three answers. The
+vignette then made it four, and its own re-arm fraction was a fourth threshold
+papering over the same gap.
+
+### The 30% punch is gone
+
+An exhausted punch now deals **zero**. `Config.ZeroStaminaPunchDamageMultiplier`
+is deleted; the multiplier is 1 or 0 and nothing in between.
+
+What is deliberately *not* done is refusing the punch. The swing plays, the
+`Hit` marker fires, `PunchRequest` goes out, target selection runs, the parry
+gate still applies, and the impact still sounds from the target's root part —
+the punch happens in every respect except that `HealthService.takeDamage`
+receives zero and `HealthState.damage` ignores a non-positive amount. An attack
+that silently does not happen reads as a broken game; one that visibly connects
+for nothing reads as being too tired to hurt anybody, which is what it is.
+
+### The latch is the server's, and it is replicated
+
+`record.exhausted` is written in exactly one place, `refreshExhaustion`, called
+after every path that moves the pool. The client is *told* the answer on the
+existing `StaminaChanged` remote, as a third argument — no new remote, and no
+client re-deriving a latch whose memory could drift from the server's.
+
+That matters because the latch has memory. Before, `RunningController` and
+`ScreenEffectsController` each kept their own `wasLocked` and each re-evaluated
+the predicate; two copies that happened to agree because they were fed the same
+events in the same order. A replicated boolean cannot disagree at all, and a
+modified client editing its copy changes nothing the server enforces — the
+guard refusal and the zero-damage punch are both decided server-side from
+`record.exhausted`, never from anything a client says.
+
+`StaminaChanged` is forced whenever the flag moves. Recovery lands part way
+between two ordinary replication steps (`shouldReplicate` only fires on a 2%
+move), so without the force a client would hear about recovery up to a tick
+late and refuse a guard the server would have allowed.
+
+### Being low is not being exhausted
+
+The recovery fraction gates only the way *out*. `isExhausted` answers false for
+any non-empty pool when `wasExhausted` is false, so a player who has never hit
+zero sprints, guards and punches at full strength on their last point of
+stamina. There is no "you cannot act below 25%" rule and there must not be one.

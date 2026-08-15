@@ -49,17 +49,23 @@ Combat specifics that are easy to break:
   player *is* sprinting, not whether Shift is down — and nothing else. There is
   exactly **one** `Heartbeat` loop for stamina, in `StaminaService`, and
   `StaminaChanged` fires on meaningful change, never per frame.
+- Exhaustion is **one** latched state, `StaminaState.isExhausted`, computed once
+  by `StaminaService` and replicated. It engages when the pool empties (however
+  it emptied) and releases only at `Config.StaminaRecoveryFraction`. Sprint,
+  guard, punch damage and the vignette all read that one boolean — do not add a
+  second threshold or re-derive it client-side.
 - The empty-pool rules for punching and guarding are enforced server-side:
   `ParryService` refuses a `begin` and ends a live guard, `CombatService`
-  multiplies the punch damage. The matching client checks are presentation only
-  — do not move a decision into them.
+  multiplies punch damage by zero. The punch itself is never refused — it
+  swings, connects and is heard, and simply does nothing. The matching client
+  checks are presentation only — do not move a decision into them.
 - The empty-pool rule for **sprinting** is the exception, because sprinting is a
   `WalkSpeed` and the server does not write that property. `RunningController`
-  applies the shared `StaminaState.sprintLocked` to the pool the server sent.
+  applies the shared exhaustion latch the server sent.
   The server still owns recovery: it regenerates a player it cannot see
   sprinting and charges one it can, so ignoring the lockout costs a modified
   client its refill. The lockout engages at zero and releases at
-  `Config.SprintRecoveryStaminaFraction` — two thresholds, deliberately, so an
+  `Config.StaminaRecoveryFraction` — two thresholds, deliberately, so an
   exhausted player does not judder between speeds. See `docs/decisions.md`.
 - The punch swing sound is fitted to `AnimationTrack.Length`, not to a written
   duration. The punch impact is created **on the server**, in the target's

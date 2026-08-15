@@ -20,7 +20,7 @@
 	it changes the speed, and everything that changes the speed has to be
 	recomputed from one state or the inputs strand each other. It is not a
 	fourth thing this file decides, though -- the rule itself is
-	StaminaState.sprintLocked, shared with the server, and RunningController
+	StaminaState.isExhausted, decided by the server, and RunningController
 	hands the answer in through withStaminaLocked. This file only knows that a
 	locked sprint is not a sprint.
 ]]
@@ -76,7 +76,7 @@ function SprintState.withInputEnded(state: SprintState): SprintState
 end
 
 --[[
-	The stamina lockout, as decided by StaminaState.sprintLocked against the
+	The stamina lockout, as decided by StaminaState.isExhausted against the
 	pool the server last sent. Idempotent.
 
 	Preserves the sprint request rather than clearing it, so the lock releasing

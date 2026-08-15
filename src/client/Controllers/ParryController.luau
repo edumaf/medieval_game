@@ -329,7 +329,7 @@ function ParryController.Start()
 	-- not the client deciding anything. endParry sends "end", which the server's
 	-- idle state ignores.
 	StaminaController.onChanged(function()
-		if StaminaController.isEmpty() then
+		if StaminaController.isExhausted() then
 			endParry()
 		end
 	end)

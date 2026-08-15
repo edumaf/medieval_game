@@ -185,27 +185,33 @@ local Config = {
 	-- refilling on the tick after the last stamina-consuming action stops.
 	StaminaRegenPerSecond = 10,
 
-	-- What a punch thrown on an empty pool is worth, as a multiplier on
-	-- PunchDamage. CombatService multiplies the two, so the reduced damage is
-	-- always derived and the number 7.5 appears nowhere.
-	ZeroStaminaPunchDamageMultiplier = 0.3,
-
 	-- How full the pool has to be, as a fraction of MaxStamina, before a player
-	-- who has run themselves empty may sprint again.
+	-- who has run themselves empty stops being exhausted.
 	--
-	-- This is the second threshold of a deliberate hysteresis, and it is what
-	-- makes exhaustion a state rather than a stutter. A single threshold at zero
-	-- would let the first tick of regeneration buy a tick of sprinting: at the
-	-- shipped rates the pool would gain 1 and immediately spend 1.2, ten times a
-	-- second, and the player would judder between 16 and 24 for as long as they
-	-- held the key.
+	-- The one recovery threshold in the game. Everything an empty pool takes
+	-- away comes back at exactly this point and no other — sprinting, guarding,
+	-- full-strength punches, and the exhaustion vignette clearing — because all
+	-- four read the single latch StaminaState.isExhausted computes from it. A
+	-- second threshold anywhere would mean a player who could sprint but not
+	-- guard, which is not a state this game has.
+	--
+	-- It is the far end of a deliberate hysteresis, and it is what makes
+	-- exhaustion a state rather than a stutter. A single threshold at zero would
+	-- let the first tick of regeneration buy a tick of sprinting: at the shipped
+	-- rates the pool would gain 1 and immediately spend 1.2, ten times a second,
+	-- and the player would judder between 16 and 24 for as long as they held the
+	-- key.
 	--
 	-- At 0.25 an exhausted player walks for two and a half seconds and gets
 	-- about two seconds of sprint back. Raising it lengthens the recovery;
-	-- lowering it towards zero brings the judder back. The lockout is released
-	-- by this fraction alone and never by the key, so releasing Shift and
-	-- pressing it again cannot shorten it -- see StaminaState.sprintLocked.
-	SprintRecoveryStaminaFraction = 0.25,
+	-- lowering it towards zero brings the judder back. It is released by this
+	-- fraction alone and never by an input, so releasing Shift and pressing it
+	-- again cannot shorten it, and neither can letting go of Q.
+	--
+	-- It gates only the way *out* of exhaustion. A player who has never reached
+	-- zero is never compared against it, so the last quarter of a full pool
+	-- sprints, guards and punches exactly as normally as the first.
+	StaminaRecoveryFraction = 0.25,
 
 	-- How often StaminaService's single Heartbeat loop actually steps every
 	-- player's pool. The step is integrated against real elapsed time, so this
@@ -334,9 +340,9 @@ local Config = {
 
 	--[[
 		Exhaustion — the vignette drawn once, as the sprint lockout engages.
-		Triggered by StaminaState.sprintLocked going true, which is the same
-		predicate RunningController applies to take the sprint away; see
-		docs/decisions.md.
+		Triggered by the shared exhaustion latch going true — the same one that
+		takes the sprint away, refuses a guard and zeroes punch damage. See
+		StaminaState.isExhausted and docs/decisions.md.
 	]]
 
 	-- Near-black rather than a colour, so it reads as draining rather than as a
@@ -363,22 +369,6 @@ local Config = {
 	ScreenEffectExhaustionRiseSeconds = 0.12,
 	ScreenEffectExhaustionHoldSeconds = 0.45,
 	ScreenEffectExhaustionFadeSeconds = 0.8,
-
-	-- How far the pool has to refill, as a fraction of MaxStamina, before
-	-- running it dry again is worth drawing a second time.
-	--
-	-- This is the vignette's own re-arm gate and is deliberately NOT
-	-- SprintRecoveryStaminaFraction. That one decides when sprinting comes
-	-- back, which is a movement rule with a movement's tolerances; borrowing it
-	-- here meant a player who emptied the pool, recovered part way, and then
-	-- emptied it again by punching or guarding got no vignette at all, because
-	-- the sprint lockout had never released in between.
-	--
-	-- Low, but above what regeneration returns between two swings on cooldown
-	-- (about 6 at the shipped rates). That is what separates "ran the pool dry
-	-- again" from "is still pinned at empty and kept punching", so the effect
-	-- fires once per real exhaustion and never strobes.
-	ScreenEffectExhaustionRearmFraction = 0.1,
 
 	--[[
 		Sound. Each entry is a Types.SoundSpec: an asset id, a volume, a

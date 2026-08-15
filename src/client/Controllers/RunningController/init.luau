@@ -20,11 +20,12 @@
 	anyway. See docs/decisions.md for what this does and does not close.
 
 	Running the pool empty takes the sprint away until it has recovered. The
-	rule is StaminaState.sprintLocked and the pool is the server's, arriving
-	here through StaminaController -- this controller evaluates a shared
-	predicate against a server-owned number and applies the result to the
-	property it already owns. It does not decide when a player is exhausted any
-	more than it decides how much stamina a sprint costs.
+	rule is StaminaState.isExhausted, the pool and the latch are both the
+	server's, and both arrive here through StaminaController -- this controller
+	applies a decision the server already made to the property it already owns.
+	It does not decide when a player is exhausted any more than it decides how
+	much stamina a sprint costs, and the sprint comes back at exactly the moment
+	the guard and full-strength punches do.
 
 	The boolean reported over the remote is therefore whether the player is
 	*sprinting*, not whether Shift is down. That distinction is what lets the
@@ -46,7 +47,6 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
 local Logger = require(Shared.Util.Logger)
 local Net = require(Shared.Net)
-local StaminaState = require(Shared.Stamina.StaminaState)
 
 local StaminaController = require(script.Parent.StaminaController)
 
@@ -123,16 +123,13 @@ end
 	two transitions that matter -- becoming exhausted, and recovering -- so the
 	steady drain in between costs a comparison.
 
-	The latch lives in `state` rather than here: StaminaState.sprintLocked is
-	pure and takes the previous answer, exactly as StaminaState.shouldReplicate
-	takes the last value sent.
+	The latch itself is the server's. StaminaService computes it once with
+	StaminaState.isExhausted and replicates the answer, so this controller reads
+	the same exhaustion the guard and the punch are being judged by rather than
+	deriving a second copy that could drift from it.
 ]]
 local function refreshStaminaLock()
-	local locked = StaminaState.sprintLocked(
-		StaminaController.getState(),
-		state.staminaLocked,
-		Config.SprintRecoveryStaminaFraction
-	)
+	local locked = StaminaController.isExhausted()
 
 	if locked == state.staminaLocked then
 		return
@@ -206,10 +203,10 @@ function RunningController.Start()
 	end
 
 	-- An empty pool takes the sprint away, and recovering to
-	-- Config.SprintRecoveryStaminaFraction gives it back. Both arrive here as an
-	-- ordinary stamina update: the server sends both ends of the pool exactly
-	-- (StaminaState.shouldReplicate), so the transition to zero is never a value
-	-- this client had to approximate.
+	-- Config.StaminaRecoveryFraction gives it back. Both arrive here as an
+	-- ordinary stamina update carrying the server's own exhaustion flag, and
+	-- the server forces a message whenever that flag moves, so neither
+	-- transition is one this client had to approximate.
 	StaminaController.onChanged(refreshStaminaLock)
 
 	-- StaminaController assumes a full pool until the server says otherwise, so

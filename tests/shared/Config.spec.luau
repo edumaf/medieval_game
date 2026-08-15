@@ -149,26 +149,6 @@ describe("Shared.Config", function()
 		expect(brightest < 0.35).toBe(true)
 	end)
 
-	it("re-arms the exhaustion vignette well below the sprint recovery gate", function()
-		-- The regression this ordering exists to prevent. The vignette used to
-		-- re-arm at SprintRecoveryStaminaFraction, which stays engaged up to a
-		-- quarter of the pool, so emptying a partly recovered pool by guarding
-		-- or punching drew nothing at all.
-		--
-		-- It has to stay below that gate, and above what regeneration returns
-		-- between two swings on cooldown -- otherwise punching an empty pool
-		-- re-triggers on every swing.
-		local regenBetweenSwings = Config.StaminaRegenPerSecond * Config.PunchCooldownSeconds
-
-		expect(Config.ScreenEffectExhaustionRearmFraction > 0).toBe(true)
-		expect(Config.ScreenEffectExhaustionRearmFraction < Config.SprintRecoveryStaminaFraction).toBe(
-			true
-		)
-		expect(Config.ScreenEffectExhaustionRearmFraction * Config.MaxStamina > regenBetweenSwings).toBe(
-			true
-		)
-	end)
-
 	it("holds the exhaustion vignette before fading it", function()
 		-- The hold is what separates this from a damage flash, and the long fade
 		-- is what makes it read as recovering. A zero hold would collapse it
@@ -282,21 +262,14 @@ describe("Shared.Config", function()
 		expect(Config.PunchStaminaCost < Config.MaxStamina).toBe(true)
 	end)
 
-	it("weakens an exhausted punch without erasing or strengthening it", function()
-		-- At 0 the punch would deal nothing and read as a broken hit; at or above
-		-- 1 running out of stamina would be free or an upgrade.
-		expect(Config.ZeroStaminaPunchDamageMultiplier > 0).toBe(true)
-		expect(Config.ZeroStaminaPunchDamageMultiplier < 1).toBe(true)
-	end)
-
 	it("makes an exhausted sprinter wait for a real fraction of the pool", function()
 		-- At or below 0 the lockout would release on the first tick of
 		-- regeneration and the player would judder between walking and sprinting
 		-- ten times a second, which is the failure the second threshold exists to
 		-- prevent. At or above 1 only a completely full pool would ever release
 		-- it, which turns a short exhaustion into the whole regeneration.
-		expect(Config.SprintRecoveryStaminaFraction > 0).toBe(true)
-		expect(Config.SprintRecoveryStaminaFraction < 1).toBe(true)
+		expect(Config.StaminaRecoveryFraction > 0).toBe(true)
+		expect(Config.StaminaRecoveryFraction < 1).toBe(true)
 	end)
 
 	it("buys back more sprint than the recovery costs to reach", function()
@@ -304,7 +277,7 @@ describe("Shared.Config", function()
 		-- threshold and spending it again should leave the player sprinting for a
 		-- usable stretch, not for a step. Both sides are derived from the shipped
 		-- rates, so retuning either drain or regen re-checks this.
-		local recovered = Config.MaxStamina * Config.SprintRecoveryStaminaFraction
+		local recovered = Config.MaxStamina * Config.StaminaRecoveryFraction
 		local sprintSeconds = recovered / Config.SprintStaminaDrainPerSecond
 
 		expect(sprintSeconds >= 1).toBe(true)

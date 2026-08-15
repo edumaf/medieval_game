@@ -25,8 +25,9 @@
 	all fade on their own; death is the end of a character and stays until a new
 	one arrives.
 
-	Exhaustion is not a health change at all — it is the sprint lockout
-	engaging, which is a stamina rule. It lives here rather than in a controller
+	Exhaustion is not a health change at all — it is the shared stamina
+	exhaustion latch engaging, the same one that takes the sprint and the guard
+	away and zeroes punch damage. It lives here rather than in a controller
 	of its own because it is the same vignette, drawn by the same four bands,
 	competing for the same screen as the other three, and something has to
 	decide which of them wins.
@@ -159,15 +160,16 @@ end
 	guard and throwing a punch all spend the same pool and all reach zero the
 	same way, and a vignette that reported only one of them would be reporting
 	the cause rather than the state. The caller supplies both booleans from
-	StaminaState.sprintLocked applied to the server's own pool, so there is
-	still exactly one definition of exhaustion in this game and this function
-	does not add a second — it only decides when to say so.
+	the server's own exhaustion latch, so there is still exactly one definition
+	of exhaustion in this game and this function does not add a second — it only
+	decides when to say so.
 
 	An edge rather than a plain "is the pool empty" test, because the pool keeps
 	replicating while it sits at zero and every one of those updates would
 	otherwise redraw. The latch behind `isExhausted` supplies the hysteresis
-	that also stops a player who keeps punching an empty pool re-triggering it
-	on every swing; see Config.ScreenEffectExhaustionRearmFraction.
+	that also stops a player regenerating out of an empty pool being told twice:
+	it does not release until Config.StaminaRecoveryFraction, which is the same
+	moment the sprint, the guard and full-strength punches come back.
 ]]
 function ScreenEffectState.forExhaustion(
 	wasExhausted: boolean,

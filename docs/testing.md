@@ -593,7 +593,7 @@ gameplay steps first and come back to the UI ones.
    while you walk — the pool must recover under a held key, not stall at zero —
    and that you do **not** flicker between 16 and 24 as it climbs.
 8. Still holding Shift, confirm you start sprinting again on your own at about a
-   quarter of the bar (`Config.SprintRecoveryStaminaFraction`), without touching
+   quarter of the bar (`Config.StaminaRecoveryFraction`), without touching
    the key.
 9. Sprint to empty again, then release Shift and immediately press it again,
    repeatedly. Confirm this does **not** get you sprinting — the lockout is
@@ -619,7 +619,7 @@ gameplay steps first and come back to the UI ones.
     spent both times — a swing costs whether or not it lands.
 16. Drain the pool to zero with sprinting, then punch. Confirm the target loses
     exactly **7.5** and Output logs `for 7.5`. If you have retuned
-    `PunchDamage` or `ZeroStaminaPunchDamageMultiplier`, confirm the logged
+    `PunchDamage`, confirm the logged
     number is the product of the two.
 17. Punch repeatedly from full without sprinting until the pool empties.
     Confirm the punch that *empties* the bar still deals 25, and the next one
@@ -896,3 +896,60 @@ stamina bar to refill completely, because a full recovery hides the bug.
     get **one** vignette that fades normally, not one per swing and no strobing.
 20. Run the pool dry, then let it refill completely before emptying it again by
     any means. Confirm exactly one vignette each time.
+
+## Manual verification: the shared exhaustion state
+
+Running the pool to zero takes away the sprint, the guard and all punch damage
+at once, and gives all three back at once at `Config.StaminaRecoveryFraction`.
+`StaminaState.spec.luau` covers the rule and the four consequences together;
+these steps confirm the four systems actually move in step in a live game.
+
+Steps 1–8 are solo **Play**. Steps 9–13 need a second player to punch.
+
+**Entering exhaustion by each route**
+
+1. Sprint until the bar empties. Confirm all four at once: the speed drops to
+   16, the dark vignette plays, Q does nothing at all, and a punch swings but
+   the other player takes nothing.
+2. Recover fully, then hold Q until the bar empties. Confirm the guard is
+   dropped out from under you and the same four things are true.
+3. Recover fully, then punch until the bar empties. Confirm the same four again.
+   The route in must not matter.
+
+**While exhausted and below the threshold**
+
+4. From step 3, keep punching. Confirm every swing still plays, still makes both
+   sounds, and deals **zero** — the health bar of the player you are hitting must
+   not move at all.
+5. Confirm Q still does nothing while the bar sits anywhere below a quarter.
+6. Confirm Shift still gives you 16, not 24, at the same point.
+7. Watch the bar cross a quarter. Confirm sprint, guard and full damage all
+   return on the same tick, and that the vignette does not replay.
+
+**Never exhausted**
+
+8. From a full pool, sprint until the bar is *low but not empty* — stop with a
+   sliver left. Confirm you can still sprint on it, still guard, and still punch
+   for the full 25. The threshold only gates the way out of exhaustion; a player
+   who has never hit zero is unaffected by it.
+
+**With a second player**
+
+9. Have A punch B until A is exhausted. Confirm B's health stops moving entirely
+   from that point, and that A's swing and impact are still audible to both.
+10. Confirm B's own stamina and exhaustion are untouched by A's — exhaustion is
+    per-player.
+11. Have B guard while exhausted. Confirm the guard never comes up and A's
+    punches land normally on B.
+12. Have A exhaust themselves, then die. Confirm the death vignette shows, not
+    the exhaustion one.
+13. Respawn A. Confirm a full bar, no vignette, and that sprint, guard and full
+    punch damage are all immediately available again.
+
+**Server authority**
+
+14. In the client console, set any local stamina or exhaustion value you can
+    reach. Confirm nothing changes: punches keep dealing what the server says,
+    a guard started on a locally-faked pool is still refused, and the bar snaps
+    back on the next update. The exhaustion flag is replicated, not derived, so
+    editing the client's copy changes nothing it is allowed to decide.

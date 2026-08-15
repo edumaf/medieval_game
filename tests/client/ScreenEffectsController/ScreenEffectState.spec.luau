@@ -269,36 +269,32 @@ describe("ScreenEffectsController.ScreenEffectState", function()
 	end)
 
 	--[[
-		The regression this feature shipped with. The vignette itself was never
-		tied to sprinting -- StaminaState.sprintLocked engages on an empty pool
-		whatever emptied it -- but the controller re-armed it at
-		Config.SprintRecoveryStaminaFraction, the gate that decides when
-		*sprinting* comes back. That gate stays engaged all the way up to a
-		quarter of the pool, so a player who emptied it, recovered part way and
-		then emptied it again by guarding or punching produced no rising edge at
-		all.
+		The vignette rides the one shared exhaustion latch: the same
+		StaminaState.isExhausted answer, computed once by StaminaService against
+		Config.StaminaRecoveryFraction, that also takes the sprint and the guard
+		away and zeroes punch damage.
 
-		These drive the exact chain the controller drives: the shared predicate
-		against a pool, then the edge test. The fractions are the two real ones,
-		because which fraction is passed is the whole bug.
+		These drive the exact chain the controller drives -- the shared predicate
+		against a pool, then the edge test -- so a vignette can never appear for a
+		player the server still considers recovered, or stay silent for one it
+		considers exhausted.
 	]]
-	describe("re-arming after a partial recovery", function()
-		local SPRINT_RECOVERY_FRACTION = 0.25
-		local EXHAUSTION_REARM_FRACTION = 0.1
+	describe("against the shared exhaustion latch", function()
+		local RECOVERY = 0.25
 
 		--[[
-			How many times the vignette fires across `pools`, re-armed at
-			`rearmFraction`. Each entry is a stamina value the server replicated.
+			How many times the vignette fires across `pools`, where each entry is a
+			stamina value the server replicated.
 		]]
-		local function timesDrawn(pools: { number }, rearmFraction: number): number
+		local function timesDrawn(pools: { number }): number
 			local drawn = 0
 			local wasExhausted = false
 
 			for _, current in pools do
-				local exhausted = StaminaState.sprintLocked(
+				local exhausted = StaminaState.isExhausted(
 					{ current = current, max = 100 },
 					wasExhausted,
-					rearmFraction
+					RECOVERY
 				)
 				if ScreenEffectState.forExhaustion(wasExhausted, exhausted, TUNING) then
 					drawn += 1
@@ -309,36 +305,39 @@ describe("ScreenEffectsController.ScreenEffectState", function()
 			return drawn
 		end
 
-		it("draws again when a partly recovered pool is emptied by anything", function()
-			-- Sprint to zero, rest to a fifth of the pool, then guard it back to
-			-- zero. Two exhaustions, so two vignettes.
-			local pools = { 60, 30, 0, 8, 16, 20, 12, 4, 0 }
-
-			expect(timesDrawn(pools, EXHAUSTION_REARM_FRACTION)).toBe(2)
+		it("draws once however the pool was emptied", function()
+			-- Sprinting, guarding and punching all reach zero the same way, so all
+			-- three draw the same single vignette.
+			expect(timesDrawn({ 60, 30, 0 })).toBe(1)
+			expect(timesDrawn({ 88, 44, 8, 0 })).toBe(1)
+			expect(timesDrawn({ 90, 80, 70, 0 })).toBe(1)
 		end)
 
-		it("is what the sprint recovery gate got wrong", function()
-			-- The same sequence, re-armed at the movement gate. The pool never
-			-- reaches a quarter, so the second exhaustion is silent. Pinned so
-			-- nobody re-points the vignette at that fraction.
-			local pools = { 60, 30, 0, 8, 16, 20, 12, 4, 0 }
+		it(
+			"stays silent through a partial recovery, because the player is still exhausted",
+			function()
+				-- The pool climbs to a fifth and is spent again. That is one exhaustion
+				-- the player never climbed out of, so it is told once -- and it is the
+				-- same answer the sprint, the guard and punch damage are giving, which
+				-- is the point of them sharing a latch.
+				expect(timesDrawn({ 60, 30, 0, 8, 16, 20, 12, 4, 0 })).toBe(1)
+			end
+		)
 
-			expect(timesDrawn(pools, SPRINT_RECOVERY_FRACTION)).toBe(1)
+		it("draws again once the pool has genuinely recovered", function()
+			-- Past the recovery threshold the latch releases, so the next emptying
+			-- is a new exhaustion and gets its own vignette.
+			expect(timesDrawn({ 60, 0, 10, 20, 30, 60, 20, 0 })).toBe(2)
 		end)
 
-		it("still refuses to redraw for a pool that never recovers", function()
-			-- Punching on an empty pool: regeneration returns a few points
-			-- between swings and each swing spends them again. That is one
-			-- exhaustion the player never left, not six.
-			local pools = { 0, 4, 0, 6, 0, 4, 0, 6, 0 }
-
-			expect(timesDrawn(pools, EXHAUSTION_REARM_FRACTION)).toBe(1)
+		it("never draws for a pool that stays above empty", function()
+			-- A player who has never been exhausted is never told they are, however
+			-- low the pool gets.
+			expect(timesDrawn({ 100, 80, 40, 12, 2, 30, 60, 100 })).toBe(0)
 		end)
 
-		it("draws nothing at all for a pool that never empties", function()
-			local pools = { 100, 80, 40, 12, 30, 60, 100 }
-
-			expect(timesDrawn(pools, EXHAUSTION_REARM_FRACTION)).toBe(0)
+		it("does not redraw while the pool sits at zero", function()
+			expect(timesDrawn({ 10, 0, 0, 0, 0, 0 })).toBe(1)
 		end)
 	end)
 

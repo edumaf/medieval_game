@@ -33,10 +33,19 @@ local log = Logger.forScope("StaminaController")
 local StaminaController = {}
 
 local state = StaminaState.new(Config.MaxStamina)
+
+-- Whether the server says this player is exhausted. Received, never computed:
+-- StaminaState.isExhausted is a latch, and re-deriving it here from the values
+-- above would be a second copy of the memory it needs, free to drift from the
+-- one the server is actually enforcing. Assumed false until told otherwise, for
+-- the same reason the pool is assumed full.
+local exhausted = false
+
 local listeners: { (StaminaState.StaminaState) -> () } = {}
 
-local function onStaminaChanged(current: number, max: number)
+local function onStaminaChanged(current: number, max: number, isExhausted: boolean)
 	state = { current = current, max = max }
+	exhausted = isExhausted
 
 	for _, listener in listeners do
 		listener(state)
@@ -60,11 +69,20 @@ end
 	same rule applied to the server's own copy of the number.
 ]]
 function StaminaController.canBlock(): boolean
-	return StaminaState.canBlock(state)
+	return not exhausted
 end
 
-function StaminaController.isEmpty(): boolean
-	return StaminaState.isEmpty(state)
+--[[
+	Whether the server says this player is exhausted.
+
+	The one exhaustion answer on this client. RunningController takes the sprint
+	away by it, ParryController refuses and drops a guard by it, and
+	ScreenEffectsController draws the vignette when it becomes true — the same
+	boolean the server is enforcing punch damage with, so none of the four can
+	disagree about when a player is exhausted or when they have recovered.
+]]
+function StaminaController.isExhausted(): boolean
+	return exhausted
 end
 
 --[[
@@ -87,8 +105,8 @@ function StaminaController.Start()
 	-- the same shape the server's handlers use. Nothing is validated here: the
 	-- server is the only thing that can fire this, and it is the side that owns
 	-- the number in the first place.
-	staminaChanged.OnClientEvent:Connect(function(current: any, max: any)
-		onStaminaChanged(current, max)
+	staminaChanged.OnClientEvent:Connect(function(current: any, max: any, isExhausted: any)
+		onStaminaChanged(current, max, isExhausted)
 	end)
 
 	log.info("listening for stamina updates")
