@@ -21,11 +21,17 @@
 ]]
 
 --[[
-	The three things the screen can be showing. Damage and healing are ordinary
-	health changes and fade on their own; death is the end of a character and
-	stays until a new one arrives.
+	The four things the screen can be showing. Damage, healing and exhaustion
+	all fade on their own; death is the end of a character and stays until a new
+	one arrives.
+
+	Exhaustion is not a health change at all — it is the sprint lockout
+	engaging, which is a stamina rule. It lives here rather than in a controller
+	of its own because it is the same vignette, drawn by the same four bands,
+	competing for the same screen as the other three, and something has to
+	decide which of them wins.
 ]]
-export type EffectKind = "damage" | "heal" | "death"
+export type EffectKind = "damage" | "heal" | "death" | "exhaustion"
 
 --[[
 	A complete description of one vignette, in the terms the controller draws
@@ -52,9 +58,11 @@ export type Tuning = {
 	damageColor: Color3,
 	healColor: Color3,
 	deathColor: Color3,
+	exhaustionColor: Color3,
 	minIntensity: number,
 	maxIntensity: number,
 	deathIntensity: number,
+	exhaustionIntensity: number,
 	minHealthChange: number,
 	edgeReach: number,
 	deathEdgeReach: number,
@@ -115,6 +123,56 @@ function ScreenEffectState.death(tuning: Tuning): ScreenEffect
 		intensity = tuning.deathIntensity,
 		reach = tuning.deathEdgeReach,
 	}
+end
+
+--[[
+	The vignette running out of stamina deserves. Always the same one, like
+	death: the pool is empty, and how it got there is not something the player
+	needs told.
+
+	Drawn at the shared resting reach rather than spreading like death does, and
+	at a fixed intensity that Config keeps below the death one. Being exhausted
+	is a cost, not an emergency, and it must never be mistaken for either being
+	hit or dying.
+]]
+function ScreenEffectState.exhaustion(tuning: Tuning): ScreenEffect
+	return {
+		kind = "exhaustion",
+		color = tuning.exhaustionColor,
+		intensity = tuning.exhaustionIntensity,
+		reach = tuning.edgeReach,
+	}
+end
+
+--[[
+	The vignette the sprint lockout deserves as it changes, or nil if this
+	change is not one worth drawing.
+
+	Only the rising edge draws anything. `isLocked` is
+	StaminaState.sprintLocked's answer for the pool the server last sent, and
+	`wasLocked` is the previous one — so this fires once as the player becomes
+	exhausted, stays quiet for as long as they remain exhausted however many
+	stamina updates arrive in the meantime, stays quiet as the lockout releases,
+	and fires again the next time they run the pool dry.
+
+	Deliberately an edge rather than a predicate on the pool itself. The lockout
+	engages at zero and releases at a recovery fraction, so it is already the
+	hysteresis that stops an exhausted player juddering — reading "is the pool
+	empty" here instead would draw the vignette again on every update while it
+	sat at zero, and would flicker it around the threshold on the way back up.
+	There is one definition of exhaustion in this game and it is
+	StaminaState.sprintLocked; this only decides when to say so.
+]]
+function ScreenEffectState.forSprintLock(
+	wasLocked: boolean,
+	isLocked: boolean,
+	tuning: Tuning
+): ScreenEffect?
+	if isLocked and not wasLocked then
+		return ScreenEffectState.exhaustion(tuning)
+	end
+
+	return nil
 end
 
 --[[
@@ -201,9 +259,17 @@ end
 	    still fading restarts the fade rather than dropping the screen to the
 	    scratch's own strength).
 
-	Crossing between damage and healing has no such rule: a heal immediately
-	after a hit is drawn green, at its own strength, because telling the player
-	they are being healed is the whole point of showing it.
+	Crossing between kinds has no such rule: a heal immediately after a hit is
+	drawn green, at its own strength, because telling the player they are being
+	healed is the whole point of showing it. Exhaustion crosses the same way in
+	both directions — it replaces a hit still fading, and a hit landing a moment
+	later replaces it, because being attacked is the more urgent of the two and
+	the screen only says one thing at a time.
+
+	Exhaustion is subject to the death rule like everything else, which is the
+	whole reason it goes through this function rather than being drawn directly:
+	running the pool dry a frame after the killing blow must not wipe the death
+	vignette off the screen and replace it with a grey one.
 ]]
 function ScreenEffectState.withEffect(
 	state: ScreenEffectState,

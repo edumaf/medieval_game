@@ -23,7 +23,7 @@ having no gameplay, and do not rebuild what is listed below.
 | Parry (hold Q) | `ParryService` | `ParryController` | `Shared/Combat/ParryState` |
 | Sprint (hold Shift) | intent only, via `StaminaService` | `RunningController/` | `SprintState` |
 | Stamina | `StaminaService` | `StaminaController`, `StaminaBarController` | `Shared/Stamina/StaminaState` |
-| Damage/heal/death vignette | — client-only | `ScreenEffectsController/` | `ScreenEffectState` |
+| Damage/heal/death/exhaustion vignette | — client-only | `ScreenEffectsController/` | `ScreenEffectState` |
 | Combat/health audio | `CombatService` (impact) | `PunchController` (swing), `ScreenEffectsController` (stings) | `Shared/Util/Audio` |
 | Boot handshake | `SessionService` | `SessionController` | — |
 

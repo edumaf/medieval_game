@@ -28,14 +28,17 @@ local MAX_HEALTH = 100
 local DAMAGE_COLOR = Color3.fromRGB(150, 15, 15)
 local HEAL_COLOR = Color3.fromRGB(40, 175, 65)
 local DEATH_COLOR = Color3.fromRGB(110, 0, 0)
+local EXHAUSTION_COLOR = Color3.fromRGB(25, 25, 25)
 
 local TUNING: ScreenEffectState.Tuning = {
 	damageColor = DAMAGE_COLOR,
 	healColor = HEAL_COLOR,
 	deathColor = DEATH_COLOR,
+	exhaustionColor = EXHAUSTION_COLOR,
 	minIntensity = 0.2,
 	maxIntensity = 0.8,
 	deathIntensity = 1,
+	exhaustionIntensity = 0.55,
 	minHealthChange = 1,
 	edgeReach = 0.2,
 	deathEdgeReach = 0.45,
@@ -197,6 +200,73 @@ describe("ScreenEffectsController.ScreenEffectState", function()
 		end)
 	end)
 
+	describe("exhaustion", function()
+		it("draws near-black, unlike any of the other three", function()
+			local exhaustion = ScreenEffectState.exhaustion(TUNING)
+
+			expect(exhaustion.kind).toBe("exhaustion")
+			expect(exhaustion.color).toBe(EXHAUSTION_COLOR)
+			expect(exhaustion.color).never.toBe(DAMAGE_COLOR)
+			expect(exhaustion.color).never.toBe(HEAL_COLOR)
+			expect(exhaustion.color).never.toBe(DEATH_COLOR)
+		end)
+
+		it("draws weaker than dying", function()
+			-- Running out of stamina is survivable. Nothing survivable is allowed
+			-- to look like dying.
+			local exhaustion = ScreenEffectState.exhaustion(TUNING)
+
+			expect(exhaustion.intensity < ScreenEffectState.death(TUNING).intensity).toBe(true)
+			expect(exhaustion.intensity > TUNING.minIntensity).toBe(true)
+		end)
+
+		it("stays at the resting reach rather than spreading like death", function()
+			-- Spreading towards the centre is reserved for death.
+			expect(ScreenEffectState.exhaustion(TUNING).reach).toBe(TUNING.edgeReach)
+			expect(ScreenEffectState.exhaustion(TUNING).reach < TUNING.deathEdgeReach).toBe(true)
+		end)
+
+		it("draws once as the lockout engages", function()
+			local effect = ScreenEffectState.forSprintLock(false, true, TUNING)
+			assert(effect ~= nil, "expected an effect on the rising edge")
+
+			expect(effect.kind).toBe("exhaustion")
+		end)
+
+		it("draws nothing while the player stays exhausted", function()
+			-- The pool sits at zero and keeps replicating. Every one of those
+			-- updates re-evaluates the lockout, and none of them may redraw.
+			for _ = 1, 10 do
+				expect(ScreenEffectState.forSprintLock(true, true, TUNING)).toBeNil()
+			end
+		end)
+
+		it("draws nothing as the lockout releases", function()
+			-- Recovering is not an event the player needs a vignette for.
+			expect(ScreenEffectState.forSprintLock(true, false, TUNING)).toBeNil()
+		end)
+
+		it("draws nothing while the player is not exhausted at all", function()
+			expect(ScreenEffectState.forSprintLock(false, false, TUNING)).toBeNil()
+		end)
+
+		it("draws again the next time the pool is run dry", function()
+			-- The whole cycle: exhausted, held, recovered, exhausted again.
+			local sequence = { false, true, true, true, false, false, true }
+			local drawn = 0
+			local wasLocked = false
+
+			for _, locked in sequence do
+				if ScreenEffectState.forSprintLock(wasLocked, locked, TUNING) then
+					drawn += 1
+				end
+				wasLocked = locked
+			end
+
+			expect(drawn).toBe(2)
+		end)
+	end)
+
 	describe("withEffect", function()
 		it("shows an effect arriving on a clear screen", function()
 			local state = after({ effectFor(100, 75) })
@@ -275,6 +345,65 @@ describe("ScreenEffectsController.ScreenEffectState", function()
 			local second = ScreenEffectState.withEffect(first, effectFor(75, 50))
 
 			expect(second).never.toBe(first)
+		end)
+
+		it("replaces a fading hit with exhaustion", function()
+			local state = after({ effectFor(100, 75), ScreenEffectState.exhaustion(TUNING) })
+
+			expect(showing(state).kind).toBe("exhaustion")
+			expect(showing(state).color).toBe(EXHAUSTION_COLOR)
+		end)
+
+		it("replaces a fading heal with exhaustion", function()
+			local state = after({ effectFor(50, 90), ScreenEffectState.exhaustion(TUNING) })
+
+			expect(showing(state).kind).toBe("exhaustion")
+		end)
+
+		it("replaces exhaustion with a hit that lands during it", function()
+			-- Being attacked is the more urgent of the two, and the screen only
+			-- says one thing at a time.
+			local state = after({ ScreenEffectState.exhaustion(TUNING), effectFor(100, 75) })
+
+			expect(showing(state).kind).toBe("damage")
+		end)
+
+		it("replaces exhaustion with a heal that lands during it", function()
+			local state = after({ ScreenEffectState.exhaustion(TUNING), effectFor(50, 90) })
+
+			expect(showing(state).kind).toBe("heal")
+		end)
+
+		it("lets a death replace exhaustion", function()
+			local state =
+				after({ ScreenEffectState.exhaustion(TUNING), ScreenEffectState.death(TUNING) })
+
+			expect(ScreenEffectState.isShowingDeath(state)).toBe(true)
+		end)
+
+		it("keeps a death showing when exhaustion arrives behind it", function()
+			-- Running the pool dry a frame after the killing blow must not turn
+			-- the death vignette grey. Dying outranks being tired.
+			local dead = after({ ScreenEffectState.death(TUNING) })
+			local afterExhaustion =
+				ScreenEffectState.withEffect(dead, ScreenEffectState.exhaustion(TUNING))
+
+			expect(afterExhaustion).toBe(dead)
+			expect(ScreenEffectState.isShowingDeath(afterExhaustion)).toBe(true)
+		end)
+
+		it("takes an exhaustion again on a state cleared by respawn", function()
+			-- A respawn resets to initial, which must not stay locked out by the
+			-- death that preceded it.
+			local dead = after({ ScreenEffectState.death(TUNING) })
+			local respawned = ScreenEffectState.initial()
+
+			expect(ScreenEffectState.isShowingDeath(dead)).toBe(true)
+			expect(
+				showing(
+					ScreenEffectState.withEffect(respawned, ScreenEffectState.exhaustion(TUNING))
+				).kind
+			).toBe("exhaustion")
 		end)
 
 		it("lets a death replace anything that is showing", function()

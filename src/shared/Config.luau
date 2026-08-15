@@ -333,6 +333,38 @@ local Config = {
 	ScreenEffectClearSeconds = 0.3,
 
 	--[[
+		Exhaustion — the vignette drawn once, as the sprint lockout engages.
+		Triggered by StaminaState.sprintLocked going true, which is the same
+		predicate RunningController applies to take the sprint away; see
+		docs/decisions.md.
+	]]
+
+	-- Near-black rather than a colour, so it reads as draining rather than as a
+	-- fifth kind of injury. Deliberately not pure black: at this intensity a
+	-- flat 0,0,0 edge looks like the screen has failed rather than like the
+	-- player is tired.
+	ScreenEffectExhaustionColor = Color3.fromRGB(25, 25, 25),
+
+	-- Clearly visible, and deliberately between an ordinary hit and dying:
+	-- above ScreenEffectMinIntensity so it cannot be mistaken for a scratch,
+	-- and below ScreenEffectDeathIntensity so nothing that is survivable ever
+	-- looks like dying. Config.spec pins that ordering.
+	ScreenEffectExhaustionIntensity = 0.55,
+
+	-- Drawn at the shared ScreenEffectEdgeReach above rather than a reach of
+	-- its own: the centre stays clear, and spreading inwards is kept as the one
+	-- thing that means death.
+
+	-- Quick in, brief hold, slow out. The hold is what separates this from a
+	-- damage flash — an effect that started fading the instant it arrived would
+	-- read as a hit rather than as a state the player has entered — and the
+	-- long fade is what makes it feel like recovering rather than like being
+	-- hit and getting over it.
+	ScreenEffectExhaustionRiseSeconds = 0.12,
+	ScreenEffectExhaustionHoldSeconds = 0.45,
+	ScreenEffectExhaustionFadeSeconds = 0.8,
+
+	--[[
 		Sound. Each entry is a Types.SoundSpec: an asset id, a volume, a
 		playback speed, and how far away it can be heard.
 
@@ -399,6 +431,20 @@ local Config = {
 	}),
 	ScreenEffectHealSound = table.freeze({
 		id = "rbxassetid://119704275114635",
+		volume = 0.5,
+		playbackSpeed = 1,
+		rollOffMinDistance = 10,
+		rollOffMaxDistance = 60,
+	}),
+
+	-- Exhaustion has no sound yet. The empty id is the supported "not uploaded
+	-- yet" state, so this is wired through ScreenEffectsController exactly like
+	-- the two above and is silent until somebody fills in an asset — no code
+	-- change, and it will ride the same envelope as its vignette from the first
+	-- time it plays. Deliberately blank rather than borrowing one of the other
+	-- two: a made-up id here would be worse than silence.
+	ScreenEffectExhaustionSound = table.freeze({
+		id = "",
 		volume = 0.5,
 		playbackSpeed = 1,
 		rollOffMinDistance = 10,

@@ -128,6 +128,38 @@ describe("Shared.Config", function()
 		expect(Config.ScreenEffectClearSeconds > 0).toBe(true)
 	end)
 
+	it("keeps exhaustion visible, but never as loud as dying", function()
+		-- The ordering is the whole point: above the floor so running out of
+		-- stamina cannot be mistaken for a scratch, and below dying so nothing
+		-- survivable ever looks like death.
+		expect(Config.ScreenEffectExhaustionIntensity > Config.ScreenEffectMinIntensity).toBe(true)
+		expect(Config.ScreenEffectExhaustionIntensity < Config.ScreenEffectDeathIntensity).toBe(
+			true
+		)
+	end)
+
+	it("draws exhaustion in a dark grey that is not pure black", function()
+		-- Near-black reads as draining; a flat 0,0,0 edge reads as the screen
+		-- having failed. Kept dark enough that it cannot be confused with the
+		-- red and green health effects.
+		local color = Config.ScreenEffectExhaustionColor
+		local brightest = math.max(color.R, color.G, color.B)
+
+		expect(brightest > 0).toBe(true)
+		expect(brightest < 0.35).toBe(true)
+	end)
+
+	it("holds the exhaustion vignette before fading it", function()
+		-- The hold is what separates this from a damage flash, and the long fade
+		-- is what makes it read as recovering. A zero hold would collapse it
+		-- into another hit.
+		expect(Config.ScreenEffectExhaustionRiseSeconds > 0).toBe(true)
+		expect(Config.ScreenEffectExhaustionHoldSeconds > 0).toBe(true)
+		expect(Config.ScreenEffectExhaustionRiseSeconds < Config.ScreenEffectExhaustionFadeSeconds).toBe(
+			true
+		)
+	end)
+
 	it("ignores health changes too small to be worth a flash", function()
 		-- Zero would let Roblox's passive regeneration, and HealthService
 		-- snapping it back, flicker the screen. Anything as large as a punch
@@ -145,6 +177,10 @@ describe("Shared.Config", function()
 			Config.PunchImpactSound,
 			Config.ScreenEffectDamageSound,
 			Config.ScreenEffectHealSound,
+			-- Ships with an empty id, which is the "not uploaded yet" case this
+			-- test exists to allow. Every other property still has to be sane,
+			-- so that filling in the id is the only change needed.
+			Config.ScreenEffectExhaustionSound,
 		}
 
 		for _, spec in sounds do
@@ -171,6 +207,7 @@ describe("Shared.Config", function()
 		expect(table.isfrozen(Config.PunchImpactSound)).toBe(true)
 		expect(table.isfrozen(Config.ScreenEffectDamageSound)).toBe(true)
 		expect(table.isfrozen(Config.ScreenEffectHealSound)).toBe(true)
+		expect(table.isfrozen(Config.ScreenEffectExhaustionSound)).toBe(true)
 	end)
 
 	it("gives the punch impact a longer reach than the swing has", function()

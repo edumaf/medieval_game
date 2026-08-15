@@ -1,7 +1,9 @@
 --!strict
 --[[
-	ScreenEffectsController — the red/green vignette that reports the local
-	player's health to them at the edges of their screen.
+	ScreenEffectsController — the vignette that reports the local player's own
+	condition to them at the edges of their screen: red for damage, green for
+	healing, a stronger spreading red for death, and near-black for running out
+	of stamina.
 
 	No remote is involved, and no new one was added. HealthService owns health
 	on the server and mirrors it onto Humanoid.Health/MaxHealth, and Humanoid
@@ -41,15 +43,22 @@
 	it. Dying has no sound of its own yet, and silences whichever of the two was
 	playing.
 
+	Exhaustion is the one effect here that is not about health. It is drawn once
+	as the sprint lockout engages, from the same StaminaController updates
+	RunningController reads and the same StaminaState.sprintLocked predicate
+	RunningController applies — this file adds no second idea of what "exhausted"
+	means, only when to say so. It has a Config sound entry too, currently
+	blank, which is why nothing plays for it yet.
+
 	Unlike every other screen in this game, these instances are built here
 	rather than authored in Studio (docs/ui-workflow.md). That rule exists to
 	keep layout in the designer's hands, and this has no layout to hand over:
 	four full-bleed bands pinned to the screen edges, with no position, no
 	styling and no text for anyone to lay out, whose geometry is animated
-	frame by frame from Config. Everything the designer would tune — the three
-	colours, both reaches, all three durations — is in Config rather than baked
-	in here. If it ever grows a border, an icon or anything with a position,
-	it should move into StarterGui and be driven by name like the health bar.
+	frame by frame from Config. Everything the designer would tune — every
+	colour, both reaches, every duration — is in Config rather than baked in
+	here. If it ever grows a border, an icon or anything with a position, it
+	should move into StarterGui and be driven by name like the health bar.
 ]]
 
 local Players = game:GetService("Players")
@@ -61,6 +70,9 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Audio = require(Shared.Util.Audio)
 local Config = require(Shared.Config)
 local Logger = require(Shared.Util.Logger)
+local StaminaState = require(Shared.Stamina.StaminaState)
+
+local StaminaController = require(script.Parent.StaminaController)
 
 local ScreenEffectState = require(script.ScreenEffectState)
 
@@ -137,31 +149,91 @@ local BAND_LAYOUTS: { BandLayout } = {
 local FEEDBACK_SPECS: { [string]: Audio.SoundSpec } = {
 	damage = Config.ScreenEffectDamageSound,
 	heal = Config.ScreenEffectHealSound,
+	-- Ships with an empty id and so builds no Sound at all, which leaves the
+	-- exhaustion vignette silent. It is wired here rather than left out so that
+	-- filling in Config.ScreenEffectExhaustionSound is the whole change: it
+	-- will ride the same envelope as its vignette with no code to write.
+	exhaustion = Config.ScreenEffectExhaustionSound,
 }
 
 local TUNING: ScreenEffectState.Tuning = {
 	damageColor = Config.ScreenEffectDamageColor,
 	healColor = Config.ScreenEffectHealColor,
 	deathColor = Config.ScreenEffectDeathColor,
+	exhaustionColor = Config.ScreenEffectExhaustionColor,
 	minIntensity = Config.ScreenEffectMinIntensity,
 	maxIntensity = Config.ScreenEffectMaxIntensity,
 	deathIntensity = Config.ScreenEffectDeathIntensity,
+	exhaustionIntensity = Config.ScreenEffectExhaustionIntensity,
 	minHealthChange = Config.ScreenEffectMinHealthChange,
 	edgeReach = Config.ScreenEffectEdgeReach,
 	deathEdgeReach = Config.ScreenEffectDeathEdgeReach,
 }
 
-local RISE_TWEEN =
-	TweenInfo.new(Config.ScreenEffectRiseSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-local FADE_TWEEN =
-	TweenInfo.new(Config.ScreenEffectFadeSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-local DEATH_TWEEN = TweenInfo.new(
-	Config.ScreenEffectDeathRiseSeconds,
-	Enum.EasingStyle.Quint,
-	Enum.EasingDirection.Out
-)
 local CLEAR_TWEEN =
 	TweenInfo.new(Config.ScreenEffectClearSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+
+--[[
+	How each kind of effect is animated: up to its peak with `rise`, then back
+	down with `fade`.
+
+	A nil `fade` means the effect holds at its peak instead of coming back on
+	its own. Death is the only one, and a respawn is the only thing that ends
+	it.
+
+	Exhaustion's fade carries a delay, which is what gives it the brief hold at
+	full strength that the other two do not have. A delayed tween is the whole
+	mechanism — no extra timer, no second scheduled step to cancel — so the
+	generation guard in playTo covers a held exhaustion being interrupted
+	exactly as it covers everything else.
+]]
+type EffectTiming = {
+	rise: TweenInfo,
+	fade: TweenInfo?,
+}
+
+local TIMINGS: { [string]: EffectTiming } = {}
+
+do
+	local rise = TweenInfo.new(
+		Config.ScreenEffectRiseSeconds,
+		Enum.EasingStyle.Quad,
+		Enum.EasingDirection.Out
+	)
+	local fade = TweenInfo.new(
+		Config.ScreenEffectFadeSeconds,
+		Enum.EasingStyle.Quad,
+		Enum.EasingDirection.Out
+	)
+
+	TIMINGS.damage = { rise = rise, fade = fade }
+	TIMINGS.heal = { rise = rise, fade = fade }
+
+	TIMINGS.death = {
+		rise = TweenInfo.new(
+			Config.ScreenEffectDeathRiseSeconds,
+			Enum.EasingStyle.Quint,
+			Enum.EasingDirection.Out
+		),
+		fade = nil,
+	}
+
+	TIMINGS.exhaustion = {
+		rise = TweenInfo.new(
+			Config.ScreenEffectExhaustionRiseSeconds,
+			Enum.EasingStyle.Quad,
+			Enum.EasingDirection.Out
+		),
+		fade = TweenInfo.new(
+			Config.ScreenEffectExhaustionFadeSeconds,
+			Enum.EasingStyle.Quad,
+			Enum.EasingDirection.Out,
+			0,
+			false,
+			Config.ScreenEffectExhaustionHoldSeconds
+		),
+	}
+end
 
 local ScreenEffectsController = {}
 
@@ -205,6 +277,13 @@ local previousHealth: number? = nil
 -- reference that can go stale when a character is replaced.
 local healthChangedConn: RBXScriptConnection? = nil
 local diedConn: RBXScriptConnection? = nil
+
+-- The previous answer StaminaState.sprintLocked gave, which is the memory that
+-- latch needs kept for it. Only ever written by refreshStaminaLock, and only
+-- ever used to tell "already exhausted" from "just became exhausted" -- the
+-- lockout itself is decided by the shared predicate against the server's pool,
+-- never by this boolean.
+local staminaLocked = false
 
 --[[
 	Pushes the current effect and the current level onto the four bands.
@@ -402,15 +481,17 @@ local function show(effect: ScreenEffectState.ScreenEffect)
 	startFeedbackSound(showing.kind)
 	render()
 
-	if showing.kind == "death" then
-		-- No fade queued. A death holds at its peak until a new character
+	local timing = TIMINGS[showing.kind]
+	local fade = timing.fade
+	if fade == nil then
+		-- Nothing queued. A death holds at its peak until a new character
 		-- arrives and clears it.
-		playTo(1, DEATH_TWEEN)
+		playTo(1, timing.rise)
 		return
 	end
 
-	playTo(1, RISE_TWEEN, function()
-		playTo(0, FADE_TWEEN, finish)
+	playTo(1, timing.rise, function()
+		playTo(0, fade, finish)
 	end)
 end
 
@@ -424,6 +505,39 @@ local function clear()
 	end
 
 	playTo(0, CLEAR_TWEEN, finish)
+end
+
+--[[
+	Re-evaluates the sprint lockout against the pool the server last sent, and
+	draws the exhaustion vignette on the frame it engages.
+
+	This adds no second definition of "exhausted". The predicate is the shared
+	StaminaState.sprintLocked, applied to StaminaController's copy of the
+	server's own number, with the same Config.SprintRecoveryStaminaFraction --
+	exactly what RunningController does to take the sprint away. The two
+	evaluate the same function against the same inputs in the same order, so
+	they cannot disagree about when the player is exhausted; the only thing
+	kept here is the previous answer the latch needs, and the only thing decided
+	here is whether to draw anything.
+
+	Called on every StaminaChanged, which is at most a handful a second and
+	never per frame. Only the rising edge produces an effect, so a pool sitting
+	at zero draws nothing however many updates arrive -- see
+	ScreenEffectState.forSprintLock.
+]]
+local function refreshStaminaLock()
+	local locked = StaminaState.sprintLocked(
+		StaminaController.getState(),
+		staminaLocked,
+		Config.SprintRecoveryStaminaFraction
+	)
+
+	local effect = ScreenEffectState.forSprintLock(staminaLocked, locked, TUNING)
+	staminaLocked = locked
+
+	if effect then
+		show(effect)
+	end
 end
 
 local function onHealthChanged(humanoid: Humanoid, health: number)
@@ -603,7 +717,24 @@ function ScreenEffectsController.Start()
 		onCharacterAdded(player.Character)
 	end
 
-	log.info("watching health for screen effects")
+	-- Seeded before subscribing, and deliberately not through
+	-- refreshStaminaLock: a pool that is already empty when this controller
+	-- starts is a player who was exhausted before it was watching, not one who
+	-- has just become exhausted, and it must not open with a vignette. After
+	-- this the latch only moves on real transitions.
+	staminaLocked = StaminaState.sprintLocked(
+		StaminaController.getState(),
+		false,
+		Config.SprintRecoveryStaminaFraction
+	)
+
+	-- Subscribed once, for the session, exactly like RunningController does.
+	-- Not per character, so respawning cannot stack a second listener --
+	-- StaminaController never removes one, and the pool is the player's rather
+	-- than the character's.
+	StaminaController.onChanged(refreshStaminaLock)
+
+	log.info("watching health and stamina for screen effects")
 end
 
 return ScreenEffectsController

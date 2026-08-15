@@ -1172,3 +1172,79 @@ being hit, which is the one thing the death effect exists not to be.
 Adding one later is an entry in `Config` and an entry in `FEEDBACK_SPECS`, and
 nothing else — the death effect already runs through the same envelope, so it
 would be fitted to the spread automatically.
+
+## The exhaustion vignette reads the sprint lockout, not the pool
+
+`ScreenEffectsController` draws a near-black vignette once, as the sprint
+lockout engages. It adds no stamina state, no second depletion check and no
+remote.
+
+The signal is the one that already exists. `StaminaService` owns the pool and
+fires `StaminaChanged` on meaningful change; `StaminaController` holds the
+client's copy and hands it to whoever asks through `onChanged`. This controller
+subscribes exactly as `RunningController` does, applies the same shared
+`StaminaState.sprintLocked` predicate to the same server-owned number with the
+same `Config.SprintRecoveryStaminaFraction`, and draws when the answer goes
+true. The two consumers evaluate the same pure function against the same inputs
+in the same order, so they cannot disagree about when the player is exhausted —
+there is one definition of it in this game and neither of them owns it.
+
+### Why the lockout rather than "is the pool empty"
+
+Reading `StaminaState.isEmpty` here would have been fewer lines and wrong twice
+over. The pool keeps replicating while it sits at zero, so every update would
+redraw the vignette; and around the recovery threshold it would flicker on and
+off as the pool crossed back and forth.
+
+The lockout already solves both, because it is a latch rather than a predicate:
+it engages at zero and releases only at the recovery fraction, which is the
+hysteresis that stops an exhausted player juddering between speeds. Hanging the
+vignette on it means the visual and the movement penalty begin and end together
+for free, and the "draw it once" rule is a single edge test —
+`ScreenEffectState.forSprintLock` returns an effect when `isLocked` is true and
+`wasLocked` is not, and nil in every other case.
+
+The latch's memory is one boolean in this controller, held for the same reason
+`RunningController` holds its own and `StaminaState.shouldReplicate` takes
+`lastSent`: the predicate is pure, so the caller keeps the previous answer. It
+is seeded at `Start` from the current pool without drawing anything, so a
+player whose pool was already empty before this controller was watching does
+not open with a vignette they did not earn.
+
+### It is an ordinary effect once it exists
+
+Exhaustion goes through `ScreenEffectState.withEffect` like the other three,
+which is the whole reason it is in that module rather than drawn directly. It
+gets the existing rules for free, and one of them matters: a death showing
+outranks everything, so running the pool dry a frame after the killing blow
+cannot turn the death vignette grey. In the other direction it behaves like
+damage and healing — newest wins, so a hit landing during it replaces it, and
+it replaces a hit still fading. Being attacked is the more urgent of the two and
+the screen only says one thing at a time.
+
+It is drawn at the shared resting reach rather than a reach of its own.
+Spreading towards the centre is kept as the one thing that means death, and
+`Config.ScreenEffectExhaustionIntensity` sits deliberately between the hit
+floor and the death intensity — visible enough not to be mistaken for a
+scratch, never loud enough for something survivable to look like dying.
+`Config.spec` pins that ordering.
+
+### The hold is a tween delay
+
+Exhaustion is the only effect with three phases: rise, hold, fade. The hold is
+`delayTime` on the fade's own `TweenInfo`, not a `task.delay` or a second
+scheduled step — so there is still exactly one tween in flight at a time, and
+the generation guard in `playTo` covers an interrupted hold exactly as it
+covers everything else. Adding a timer would have added the one thing this
+controller was built to avoid.
+
+### The sound is wired but blank
+
+`Config.ScreenEffectExhaustionSound` ships with an empty `id`, which is the
+project's supported "not uploaded yet" state — `Audio.create` returns nil for
+it, so no Sound is built and the vignette is silent. It is listed in
+`FEEDBACK_SPECS` anyway, so filling in an asset id is the entire change: the
+sound will ride the same 0-to-1 envelope as its own vignette from the first
+time it plays, with no code to write. Borrowing the damage or heal sting
+instead would have been worse than silence, and inventing an asset id worse
+still.

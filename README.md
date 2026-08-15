@@ -89,7 +89,7 @@ Enough to fight someone. Not enough to call it a game yet.
 | **Parry** | `ParryService` + `ParryController` + `ParryState` | Hold Q, animated guard, server decides whether it stopped the punch |
 | **Sprinting** | `RunningController` + `SprintState` | Hold Shift; the speed is applied client-side, the intent is reported to the server (see `docs/decisions.md`) |
 | **Stamina** | `StaminaService` + `StaminaState` + `StaminaController` + `StaminaBarController` | 100-point pool, server-authoritative, spent by sprinting, parrying and punching, on-screen bar |
-| **Screen effects** | `ScreenEffectsController` + `ScreenEffectState` | Red vignette when hit, green when healed, a stronger spreading red on death |
+| **Screen effects** | `ScreenEffectsController` + `ScreenEffectState` | Red vignette when hit, green when healed, a stronger spreading red on death, near-black when stamina runs out |
 | **Combat & health audio** | `Shared/Util/Audio` + the systems that own each event | Punch swing fitted to the animation, impact from the target's root part, damage/heal stings on the vignette's own envelope |
 | **Session** | `SessionService` + `SessionController` | Boot handshake, detects a client on a stale build |
 

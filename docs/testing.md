@@ -825,3 +825,55 @@ with 2 players.
 23. In a 2-player test, damage **one** player. Confirm only that player hears
     the damage sound — the other must hear nothing at all. Repeat for `/heal`.
 24. Check Output for errors or warnings throughout.
+
+## Manual verification: Exhaustion vignette
+
+`ScreenEffectState.forSprintLock` covers the edge rule — once on the way in,
+never while held, never on release, again next time — in
+`tests/client/ScreenEffectsController/ScreenEffectState.spec.luau`, and the
+colour and intensity ordering is in `Config.spec.luau`. What no unit test can
+check is what it looks like, or that it lines up with the moment the sprint is
+actually taken away. Solo **Play** is enough for all of it.
+
+1. Hold Shift and run until the stamina bar empties. Confirm a dark, near-black
+   vignette appears around the edges the moment the sprint drops back to
+   walking speed — the visual and the speed change are the same event and must
+   not be a beat apart.
+2. Confirm it is clearly darker at the edges and that the middle of the screen
+   stays readable throughout.
+3. Confirm it holds briefly at full strength and then fades out smoothly,
+   rather than starting to fade the instant it appears. A vignette that snaps
+   straight back reads as a hit, not as exhaustion.
+4. Keep Shift held at zero stamina. Confirm the vignette plays **once** and does
+   not re-trigger, pulse or flicker while you stay exhausted — the pool keeps
+   replicating at zero, and none of those updates may redraw it.
+5. Release Shift and let the pool refill. Confirm nothing is drawn as the
+   lockout releases and the sprint comes back.
+6. Run the pool dry a second time. Confirm the vignette plays again.
+7. Repeat five or six times. Confirm it is identical every time and that Output
+   stays clean.
+
+**Against the other effects**
+
+8. Take damage (`/damage 25`), and while the red is still fading, run the pool
+   dry. Confirm the dark vignette replaces the red cleanly, with no flicker and
+   no red left underneath.
+9. Run the pool dry, and while the dark vignette is up, `/damage 25`. Confirm
+   the red replaces it — being hit outranks being tired.
+10. Repeat step 9 with `/heal` instead. Confirm the green replaces it.
+11. Exhaust yourself, then `/damage 500` while the dark vignette is showing.
+    Confirm the death effect takes over completely.
+12. **The important one:** `/damage 500` to die, and while the death vignette is
+    up, have the pool run dry (sprint into the death, or wait for a drain that
+    lands after it). Confirm the death vignette does **not** turn grey. Death
+    outranks exhaustion, always.
+13. Respawn after step 12. Confirm the screen clears completely and that
+    becoming exhausted on the new character draws the vignette normally.
+14. Die and respawn five times, then run the pool dry **once**. Confirm you get
+    one vignette, not several — the stamina subscription is made once for the
+    session, so a duplicate here means it has been moved into a per-character
+    path.
+15. Confirm no sound plays with it. That is expected: no exhaustion asset has
+    been uploaded, and `Config.ScreenEffectExhaustionSound` ships with an empty
+    id. Once one is filled in, re-run steps 1–7 and confirm it fades with the
+    vignette rather than outliving it.
