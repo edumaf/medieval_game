@@ -278,12 +278,13 @@ local previousHealth: number? = nil
 local healthChangedConn: RBXScriptConnection? = nil
 local diedConn: RBXScriptConnection? = nil
 
--- The previous answer StaminaState.sprintLocked gave, which is the memory that
--- latch needs kept for it. Only ever written by refreshStaminaLock, and only
--- ever used to tell "already exhausted" from "just became exhausted" -- the
--- lockout itself is decided by the shared predicate against the server's pool,
--- never by this boolean.
-local staminaLocked = false
+-- The previous answer StaminaState.sprintLocked gave for the vignette's own
+-- re-arm fraction, which is the memory that latch needs kept for it. Only ever
+-- written by refreshStaminaExhaustion, and only ever used to tell "already
+-- exhausted" from "just became exhausted" -- whether the pool is empty is
+-- decided by the shared predicate against the server's number, never by this
+-- boolean.
+local staminaExhausted = false
 
 --[[
 	Pushes the current effect and the current level onto the four bands.
@@ -508,32 +509,40 @@ local function clear()
 end
 
 --[[
-	Re-evaluates the sprint lockout against the pool the server last sent, and
-	draws the exhaustion vignette on the frame it engages.
+	Re-evaluates whether the player is exhausted against the pool the server
+	last sent, and draws the vignette on the frame it becomes true.
 
 	This adds no second definition of "exhausted". The predicate is the shared
 	StaminaState.sprintLocked, applied to StaminaController's copy of the
-	server's own number, with the same Config.SprintRecoveryStaminaFraction --
-	exactly what RunningController does to take the sprint away. The two
-	evaluate the same function against the same inputs in the same order, so
-	they cannot disagree about when the player is exhausted; the only thing
-	kept here is the previous answer the latch needs, and the only thing decided
-	here is whether to draw anything.
+	server's own number -- the same function RunningController uses to take the
+	sprint away, evaluated against the same pool. What differs is only the
+	fraction it re-arms at, and that difference is the whole point:
+
+	  * RunningController passes Config.SprintRecoveryStaminaFraction, because
+	    it is deciding when sprinting comes back.
+	  * This passes Config.ScreenEffectExhaustionRearmFraction, because it is
+	    deciding when running the pool dry is worth reporting again.
+
+	Sharing the movement one was a bug. The sprint lockout stays engaged all the
+	way up to a quarter of the pool, so a player who emptied it, recovered part
+	way and then emptied it again by guarding or punching produced no rising
+	edge and no vignette at all -- which read as the effect only working for
+	sprinting, when in fact nothing about it was ever tied to the sprint.
 
 	Called on every StaminaChanged, which is at most a handful a second and
 	never per frame. Only the rising edge produces an effect, so a pool sitting
 	at zero draws nothing however many updates arrive -- see
-	ScreenEffectState.forSprintLock.
+	ScreenEffectState.forExhaustion.
 ]]
-local function refreshStaminaLock()
-	local locked = StaminaState.sprintLocked(
+local function refreshStaminaExhaustion()
+	local exhausted = StaminaState.sprintLocked(
 		StaminaController.getState(),
-		staminaLocked,
-		Config.SprintRecoveryStaminaFraction
+		staminaExhausted,
+		Config.ScreenEffectExhaustionRearmFraction
 	)
 
-	local effect = ScreenEffectState.forSprintLock(staminaLocked, locked, TUNING)
-	staminaLocked = locked
+	local effect = ScreenEffectState.forExhaustion(staminaExhausted, exhausted, TUNING)
+	staminaExhausted = exhausted
 
 	if effect then
 		show(effect)
@@ -718,21 +727,21 @@ function ScreenEffectsController.Start()
 	end
 
 	-- Seeded before subscribing, and deliberately not through
-	-- refreshStaminaLock: a pool that is already empty when this controller
-	-- starts is a player who was exhausted before it was watching, not one who
-	-- has just become exhausted, and it must not open with a vignette. After
-	-- this the latch only moves on real transitions.
-	staminaLocked = StaminaState.sprintLocked(
+	-- refreshStaminaExhaustion: a pool that is already empty when this
+	-- controller starts is a player who was exhausted before it was watching,
+	-- not one who has just become exhausted, and it must not open with a
+	-- vignette. After this the latch only moves on real transitions.
+	staminaExhausted = StaminaState.sprintLocked(
 		StaminaController.getState(),
 		false,
-		Config.SprintRecoveryStaminaFraction
+		Config.ScreenEffectExhaustionRearmFraction
 	)
 
 	-- Subscribed once, for the session, exactly like RunningController does.
 	-- Not per character, so respawning cannot stack a second listener --
 	-- StaminaController never removes one, and the pool is the player's rather
 	-- than the character's.
-	StaminaController.onChanged(refreshStaminaLock)
+	StaminaController.onChanged(refreshStaminaExhaustion)
 
 	log.info("watching health and stamina for screen effects")
 end

@@ -1189,7 +1189,7 @@ true. The two consumers evaluate the same pure function against the same inputs
 in the same order, so they cannot disagree about when the player is exhausted —
 there is one definition of it in this game and neither of them owns it.
 
-### Why the lockout rather than "is the pool empty"
+### Why a latched reading rather than "is the pool empty"
 
 Reading `StaminaState.isEmpty` here would have been fewer lines and wrong twice
 over. The pool keeps replicating while it sits at zero, so every update would
@@ -1210,6 +1210,29 @@ The latch's memory is one boolean in this controller, held for the same reason
 is seeded at `Start` from the current pool without drawing anything, so a
 player whose pool was already empty before this controller was watching does
 not open with a vignette they did not earn.
+
+### The re-arm fraction is the vignette's own, and that was a bug once
+
+The predicate is shared with `RunningController`, but the fraction it re-arms
+at is not, and conflating the two shipped a real defect.
+
+`StaminaState.sprintLocked` engages on an empty pool *whatever emptied it* —
+sprinting, a guard, or a punch — so the vignette was never actually tied to
+sprinting. What was tied to sprinting was the threshold it came back at. The
+first implementation passed `Config.SprintRecoveryStaminaFraction`, the gate
+that decides when sprinting returns, and that gate stays engaged all the way up
+to a quarter of the pool. A player who ran the pool dry, recovered part way, and
+then emptied it again by guarding or punching produced no rising edge and no
+vignette — which reads exactly like "it only works for sprinting", when nothing
+about it ever was.
+
+`Config.ScreenEffectExhaustionRearmFraction` is that threshold, owned by the
+effect rather than borrowed from movement. It is deliberately low, and
+deliberately above what regeneration returns between two swings on cooldown
+(about 6 points at the shipped rates). That margin is the whole tuning: it
+separates "ran the pool dry again" from "is still pinned at empty and kept
+punching", so a player mashing the punch key on an empty pool gets one vignette
+rather than one per swing. `Config.spec` pins both sides of it.
 
 ### It is an ordinary effect once it exists
 

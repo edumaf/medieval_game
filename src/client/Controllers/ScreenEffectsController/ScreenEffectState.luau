@@ -145,30 +145,36 @@ function ScreenEffectState.exhaustion(tuning: Tuning): ScreenEffect
 end
 
 --[[
-	The vignette the sprint lockout deserves as it changes, or nil if this
-	change is not one worth drawing.
+	The vignette running the stamina pool dry deserves, or nil if this change is
+	not one worth drawing.
 
-	Only the rising edge draws anything. `isLocked` is
-	StaminaState.sprintLocked's answer for the pool the server last sent, and
-	`wasLocked` is the previous one — so this fires once as the player becomes
-	exhausted, stays quiet for as long as they remain exhausted however many
-	stamina updates arrive in the meantime, stays quiet as the lockout releases,
-	and fires again the next time they run the pool dry.
+	Both arguments answer "is this player exhausted", from the caller's latched
+	reading of the pool: `isExhausted` now, `wasExhausted` the time before. Only
+	the rising edge draws anything, so this fires once as the pool empties,
+	stays quiet for as long as it stays empty however many stamina updates
+	arrive in the meantime, stays quiet as it refills, and fires again the next
+	time it is run dry.
 
-	Deliberately an edge rather than a predicate on the pool itself. The lockout
-	engages at zero and releases at a recovery fraction, so it is already the
-	hysteresis that stops an exhausted player juddering — reading "is the pool
-	empty" here instead would draw the vignette again on every update while it
-	sat at zero, and would flicker it around the threshold on the way back up.
-	There is one definition of exhaustion in this game and it is
-	StaminaState.sprintLocked; this only decides when to say so.
+	It is deliberately blind to *what* emptied the pool. Sprinting, holding a
+	guard and throwing a punch all spend the same pool and all reach zero the
+	same way, and a vignette that reported only one of them would be reporting
+	the cause rather than the state. The caller supplies both booleans from
+	StaminaState.sprintLocked applied to the server's own pool, so there is
+	still exactly one definition of exhaustion in this game and this function
+	does not add a second — it only decides when to say so.
+
+	An edge rather than a plain "is the pool empty" test, because the pool keeps
+	replicating while it sits at zero and every one of those updates would
+	otherwise redraw. The latch behind `isExhausted` supplies the hysteresis
+	that also stops a player who keeps punching an empty pool re-triggering it
+	on every swing; see Config.ScreenEffectExhaustionRearmFraction.
 ]]
-function ScreenEffectState.forSprintLock(
-	wasLocked: boolean,
-	isLocked: boolean,
+function ScreenEffectState.forExhaustion(
+	wasExhausted: boolean,
+	isExhausted: boolean,
 	tuning: Tuning
 ): ScreenEffect?
-	if isLocked and not wasLocked then
+	if isExhausted and not wasExhausted then
 		return ScreenEffectState.exhaustion(tuning)
 	end
 

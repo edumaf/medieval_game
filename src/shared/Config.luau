@@ -364,6 +364,22 @@ local Config = {
 	ScreenEffectExhaustionHoldSeconds = 0.45,
 	ScreenEffectExhaustionFadeSeconds = 0.8,
 
+	-- How far the pool has to refill, as a fraction of MaxStamina, before
+	-- running it dry again is worth drawing a second time.
+	--
+	-- This is the vignette's own re-arm gate and is deliberately NOT
+	-- SprintRecoveryStaminaFraction. That one decides when sprinting comes
+	-- back, which is a movement rule with a movement's tolerances; borrowing it
+	-- here meant a player who emptied the pool, recovered part way, and then
+	-- emptied it again by punching or guarding got no vignette at all, because
+	-- the sprint lockout had never released in between.
+	--
+	-- Low, but above what regeneration returns between two swings on cooldown
+	-- (about 6 at the shipped rates). That is what separates "ran the pool dry
+	-- again" from "is still pinned at empty and kept punching", so the effect
+	-- fires once per real exhaustion and never strobes.
+	ScreenEffectExhaustionRearmFraction = 0.1,
+
 	--[[
 		Sound. Each entry is a Types.SoundSpec: an asset id, a volume, a
 		playback speed, and how far away it can be heard.

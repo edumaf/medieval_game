@@ -877,3 +877,22 @@ actually taken away. Solo **Play** is enough for all of it.
     been uploaded, and `Config.ScreenEffectExhaustionSound` ships with an empty
     id. Once one is filled in, re-run steps 1–7 and confirm it fades with the
     vignette rather than outliving it.
+
+**Exhaustion from every source, not just sprinting**
+
+These cover the regression where the vignette re-armed at the sprint recovery
+gate and so stayed silent for a pool emptied by anything else. Each one starts
+by running the pool dry, then partly recovering — do **not** wait for the
+stamina bar to refill completely, because a full recovery hides the bug.
+
+16. Sprint until exhausted (vignette #1). Stop for about two seconds, so the bar
+    refills to roughly a fifth. Now hold Q until the pool empties again. Confirm
+    a **second** vignette. Before the fix this drew nothing.
+17. Repeat, but empty the partly recovered pool by punching instead of guarding.
+    Confirm a second vignette.
+18. Repeat once more, emptying by sprinting again, and confirm it still works —
+    the fix must not have cost the case that already worked.
+19. With the pool empty, mash the punch key for ten seconds or so. Confirm you
+    get **one** vignette that fades normally, not one per swing and no strobing.
+20. Run the pool dry, then let it refill completely before emptying it again by
+    any means. Confirm exactly one vignette each time.

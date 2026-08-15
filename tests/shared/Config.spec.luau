@@ -149,6 +149,26 @@ describe("Shared.Config", function()
 		expect(brightest < 0.35).toBe(true)
 	end)
 
+	it("re-arms the exhaustion vignette well below the sprint recovery gate", function()
+		-- The regression this ordering exists to prevent. The vignette used to
+		-- re-arm at SprintRecoveryStaminaFraction, which stays engaged up to a
+		-- quarter of the pool, so emptying a partly recovered pool by guarding
+		-- or punching drew nothing at all.
+		--
+		-- It has to stay below that gate, and above what regeneration returns
+		-- between two swings on cooldown -- otherwise punching an empty pool
+		-- re-triggers on every swing.
+		local regenBetweenSwings = Config.StaminaRegenPerSecond * Config.PunchCooldownSeconds
+
+		expect(Config.ScreenEffectExhaustionRearmFraction > 0).toBe(true)
+		expect(Config.ScreenEffectExhaustionRearmFraction < Config.SprintRecoveryStaminaFraction).toBe(
+			true
+		)
+		expect(Config.ScreenEffectExhaustionRearmFraction * Config.MaxStamina > regenBetweenSwings).toBe(
+			true
+		)
+	end)
+
 	it("holds the exhaustion vignette before fading it", function()
 		-- The hold is what separates this from a damage flash, and the long fade
 		-- is what makes it read as recovering. A zero hold would collapse it
