@@ -1259,16 +1259,20 @@ the generation guard in `playTo` covers an interrupted hold exactly as it
 covers everything else. Adding a timer would have added the one thing this
 controller was built to avoid.
 
-### The sound is wired but blank
+### The sound needed no code at all
 
-`Config.ScreenEffectExhaustionSound` ships with an empty `id`, which is the
-project's supported "not uploaded yet" state — `Audio.create` returns nil for
-it, so no Sound is built and the vignette is silent. It is listed in
-`FEEDBACK_SPECS` anyway, so filling in an asset id is the entire change: the
-sound will ride the same 0-to-1 envelope as its own vignette from the first
-time it plays, with no code to write. Borrowing the damage or heal sting
-instead would have been worse than silence, and inventing an asset id worse
-still.
+`Config.ScreenEffectExhaustionSound` shipped with an empty `id` — the project's
+supported "not uploaded yet" state, which `Audio.create` answers nil for — but
+was listed in `FEEDBACK_SPECS` from the start, so the vignette was silent
+rather than unwired. Filling in the asset id was the entire integration: no
+controller change, no new listener, no timing of its own.
+
+That is the payoff of driving the audio from the vignette's own 0-to-1
+envelope. The sound inherits every rule the effect already has, because it is
+not a separate thing being kept in step — it starts on the transition into
+exhaustion whatever emptied the pool, cannot replay while the player stays
+exhausted, is silenced by a hit, a heal, a death or a respawn taking the
+vignette, and plays again the next time the pool is run dry after recovering.
 
 ## One exhaustion, four consequences
 

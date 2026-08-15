@@ -32,23 +32,23 @@
 	                          is what lets death expand towards the centre.
 	  BackgroundColor3        red or green, set once when an effect starts.
 
-	Damage and healing also have a sound, and it is driven from that same level
-	rather than given a duration of its own: the volume is the effect's own 0-to-1
-	envelope scaled by the configured peak, so each sound fades in with its
-	vignette and is silent by the time the colour is gone. There is no second
-	timing system to keep in step, because there is no second timing system —
-	retuning ScreenEffectFadeSeconds moves the audio with the colour. The two
-	sounds are flat rather than positional: this is the player's own body
-	reporting to them, not an event at a place in the world, and only they hear
-	it. Dying has no sound of its own yet, and silences whichever of the two was
-	playing.
+	Damage, healing and exhaustion each have a sound, and every one of them is
+	driven from that same level rather than given a duration of its own: the
+	volume is the effect's own 0-to-1 envelope scaled by the configured peak, so
+	each sound fades in with its vignette and is silent by the time the colour is
+	gone. There is no second timing system to keep in step, because there is no
+	second timing system — retuning a fade duration moves that effect's audio
+	with its colour. All three are flat rather than positional: this is the
+	player's own body reporting to them, not an event at a place in the world,
+	and only they hear it. Dying has no sound of its own yet, and silences
+	whichever of the three was playing.
 
 	Exhaustion is the one effect here that is not about health. It is drawn once
 	as the server's exhaustion latch engages, arriving over the same
 	StaminaChanged updates the sprint and the guard read — this file adds no
 	idea of its own about what "exhausted" means and no threshold of its own,
-	only when to say so. It has a Config sound entry too, currently blank, which
-	is why nothing plays for it yet.
+	only when to say so. Its sound rides the same envelope as its vignette, so
+	all three kinds that have one are handled by exactly the same code.
 
 	Unlike every other screen in this game, these instances are built here
 	rather than authored in Studio (docs/ui-workflow.md). That rule exists to
@@ -140,18 +140,16 @@ local BAND_LAYOUTS: { BandLayout } = {
 
 --[[
 	The sound each kind of effect plays, or nothing for a kind that has none.
+
 	Death is absent on purpose rather than by omission: no death sting has been
-	uploaded, and borrowing the damage one would contradict the whole point of
-	the death effect being unlike being hit. Adding one is an entry here and an
-	entry in Config, and nothing else.
+	uploaded, and borrowing another would contradict the whole point of the
+	death effect being unlike being hit. Adding one is an entry here and an
+	entry in Config, and nothing else — which is exactly what adding the
+	exhaustion sound turned out to be.
 ]]
 local FEEDBACK_SPECS: { [string]: Audio.SoundSpec } = {
 	damage = Config.ScreenEffectDamageSound,
 	heal = Config.ScreenEffectHealSound,
-	-- Ships with an empty id and so builds no Sound at all, which leaves the
-	-- exhaustion vignette silent. It is wired here rather than left out so that
-	-- filling in Config.ScreenEffectExhaustionSound is the whole change: it
-	-- will ride the same envelope as its vignette with no code to write.
 	exhaustion = Config.ScreenEffectExhaustionSound,
 }
 

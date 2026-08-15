@@ -873,10 +873,10 @@ actually taken away. Solo **Play** is enough for all of it.
     one vignette, not several — the stamina subscription is made once for the
     session, so a duplicate here means it has been moved into a per-character
     path.
-15. Confirm no sound plays with it. That is expected: no exhaustion asset has
-    been uploaded, and `Config.ScreenEffectExhaustionSound` ships with an empty
-    id. Once one is filled in, re-run steps 1–7 and confirm it fades with the
-    vignette rather than outliving it.
+15. Confirm the exhaustion sound plays with it, starting as the dark edges
+    appear and finishing with them rather than outliving them. It rides the
+    vignette's own envelope, so anything that cuts the vignette short — a hit,
+    a heal, a death, a respawn — must cut the sound with it.
 
 **Exhaustion from every source, not just sprinting**
 

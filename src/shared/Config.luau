@@ -443,14 +443,19 @@ local Config = {
 		rollOffMaxDistance = 60,
 	}),
 
-	-- Exhaustion has no sound yet. The empty id is the supported "not uploaded
-	-- yet" state, so this is wired through ScreenEffectsController exactly like
-	-- the two above and is silent until somebody fills in an asset — no code
-	-- change, and it will ride the same envelope as its vignette from the first
-	-- time it plays. Deliberately blank rather than borrowing one of the other
-	-- two: a made-up id here would be worse than silence.
+	-- Running the pool dry. Played by ScreenEffectsController alongside the
+	-- exhaustion vignette, on the same 0-to-1 envelope, so it fades in with the
+	-- dark edges and is silent by the time they are gone.
+	--
+	-- It therefore inherits the vignette's rules exactly: it starts on the
+	-- transition into exhaustion whatever emptied the pool, never replays while
+	-- the player stays exhausted, is silenced by a death or a respawn, and
+	-- plays again the next time the pool is run dry after recovering. Nothing
+	-- here has a duration or a trigger of its own.
+	--
+	-- Slightly quieter than the damage sting: being tired is not being hit.
 	ScreenEffectExhaustionSound = table.freeze({
-		id = "",
+		id = "rbxassetid://114135599198540",
 		volume = 0.5,
 		playbackSpeed = 1,
 		rollOffMinDistance = 10,
